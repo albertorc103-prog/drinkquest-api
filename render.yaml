@@ -1,0 +1,50 @@
+# DrinkQuest API — Render Blueprint (opcional)
+# https://render.com/docs/blueprint-spec
+#
+# Crea PostgreSQL y Web Service. Redis/MinIO: añade servicios externos o instancias aparte.
+
+services:
+  - type: web
+    name: drinkquest-api
+    runtime: node
+    region: oregon
+    plan: free
+    rootDir: backend
+    buildCommand: npm ci && npm run render:build
+    startCommand: npm run render:start
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: API_PREFIX
+        value: api/v1
+      - key: DATABASE_URL
+        fromDatabase:
+          name: drinkquest-db
+          property: connectionString
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: APP_URL
+        sync: false
+      - key: API_BASE_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: MINIO_ENDPOINT
+        sync: false
+      - key: MINIO_PUBLIC_URL
+        sync: false
+      - key: MAIL_ENABLED
+        value: false
+
+databases:
+  - name: drinkquest-db
+    plan: free
+    databaseName: drinkquest
+    user: drinkquest

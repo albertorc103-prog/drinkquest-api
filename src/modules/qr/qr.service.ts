@@ -1,0 +1,195 @@
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { DrinkRarity, QrSessionStatus, Role } from '@prisma/client';
+import { PrismaService } from '../../database/prisma.service';
+import { randomToken, sha256 } from '../../common/utils/crypto.util';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationType } from '@prisma/client';
+import { MissionsService } from '../missions/missions.service';
+
+export interface QrPayloadResponse {
+  sessionId: string;
+  businessId: string;
+  drinkId: string;
+  drinkName: string;
+  timestamp: number;
+  expiresAt: number;
+  token: string;
+}
+
+@Injectable()
+export class QrService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
+    private readonly notifications: NotificationsService,
+    private readonly missions: MissionsService,
+  ) {}
+
+  async createSession(
+    barOwnerId: string,
+    opts: { drinkId?: string; legacyDrinkId?: number },
+  ): Promise<QrPayloadResponse> {
+    const bar = await this.prisma.bar.findFirst({
+      where: { ownerUserId: barOwnerId, deletedAt: null, isActive: true },
+    });
+    if (!bar) throw new ForbiddenException('Bar no autorizado');
+
+    const drink = opts.drinkId
+      ? await this.prisma.drink.findFirst({ where: { id: opts.drinkId, deletedAt: null } })
+      : await this.prisma.drink.findFirst({ where: { legacyId: opts.legacyDrinkId, deletedAt: null } });
+    if (!drink) throw new NotFoundException('Bebida no encontrada');
+    const drinkId = drink.id;
+
+    const menuItem = await this.prisma.barMenuItem.findFirst({
+      where: { barId: bar.id, drinkId, active: true, deletedAt: null },
+      include: { drink: true },
+    });
+    if (!menuItem) throw new BadRequestException('Bebida no autorizada en este bar');
+
+    const ttlMin = this.config.get<number>('app.qrSessionTtlMinutes', 10);
+    const now = Date.now();
+    const expiresAt = new Date(now + ttlMin * 60_000);
+    const token = randomToken(24);
+
+    const session = await this.prisma.qrSession.create({
+      data: {
+        barId: bar.id,
+        drinkId,
+        tokenHash: sha256(token),
+        expiresAt,
+        status: QrSessionStatus.ACTIVE,
+      },
+    });
+
+    return {
+      sessionId: session.id,
+      businessId: bar.id,
+      drinkId,
+      drinkName: menuItem.drink.name,
+      timestamp: now,
+      expiresAt: expiresAt.getTime(),
+      token,
+    };
+  }
+
+  async redeem(
+    userId: string,
+    payload: Pick<QrPayloadResponse, 'sessionId' | 'businessId' | 'drinkId' | 'token' | 'expiresAt'>,
+  ) {
+    if (Date.now() > payload.expiresAt) {
+      await this.markExpired(payload.sessionId);
+      throw new BadRequestException('Código QR expirado');
+    }
+
+    const session = await this.prisma.qrSession.findUnique({
+      where: { id: payload.sessionId },
+      include: { bar: true, drink: true },
+    });
+    if (!session) throw new NotFoundException('Sesión no encontrada');
+    if (session.barId !== payload.businessId || session.drinkId !== payload.drinkId) {
+      throw new BadRequestException('Payload inválido');
+    }
+    if (session.tokenHash !== sha256(payload.token)) {
+      throw new BadRequestException('Token de seguridad inválido');
+    }
+    if (session.status === QrSessionStatus.USED) {
+      throw new BadRequestException('Este código ya fue utilizado');
+    }
+    if (session.status === QrSessionStatus.EXPIRED || session.expiresAt < new Date()) {
+      throw new BadRequestException('Código QR expirado');
+    }
+
+    const menuOk = await this.prisma.barMenuItem.findFirst({
+      where: { barId: session.barId, drinkId: session.drinkId, active: true, deletedAt: null },
+    });
+    if (!menuOk) throw new BadRequestException('Bebida no autorizada');
+
+    const existing = await this.prisma.userDrinkUnlock.findUnique({
+      where: { userId_drinkId: { userId, drinkId: session.drinkId } },
+    });
+    if (existing) throw new BadRequestException('Ya desbloqueaste esta bebida');
+
+    const xp = session.drink.xpReward;
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      await tx.qrSession.update({
+        where: { id: session.id },
+        data: { status: QrSessionStatus.USED, scannedById: userId, usedAt: new Date() },
+      });
+      await tx.userDrinkUnlock.create({
+        data: { userId, drinkId: session.drinkId, barId: session.barId, xpEarned: xp },
+      });
+      await tx.drinkHistoryEntry.create({
+        data: { userId, drinkId: session.drinkId, barId: session.barId },
+      });
+      return tx.user.update({
+        where: { id: userId },
+        data: { totalXp: { increment: xp } },
+      });
+    });
+
+    await this.missions.onQrUnlock(userId);
+    await this.notifications.create(
+      userId,
+      NotificationType.QR_UNLOCK,
+      '¡Bebida desbloqueada!',
+      session.drink.name,
+      { drinkId: session.drinkId, barId: session.barId },
+    );
+
+    return {
+      drinkId: session.drinkId,
+      legacyDrinkId: session.drink.legacyId,
+      drinkName: session.drink.name,
+      businessId: session.barId,
+      businessName: session.bar.businessName,
+      xpEarned: xp,
+      rarity: session.drink.rarity,
+      totalXp: result.totalXp,
+    };
+  }
+
+  async history(barId: string, limit = 50) {
+    return this.prisma.qrSession.findMany({
+      where: { barId },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      include: { drink: { select: { name: true } }, scannedBy: { select: { displayName: true } } },
+    });
+  }
+
+  async analytics(barId: string) {
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const used = await this.prisma.qrSession.findMany({
+      where: { barId, status: QrSessionStatus.USED },
+      include: { drink: true },
+    });
+    const today = used.filter((s) => s.usedAt && s.usedAt >= startOfDay);
+    const counts = new Map<string, number>();
+    for (const s of used) {
+      counts.set(s.drink.name, (counts.get(s.drink.name) ?? 0) + 1);
+    }
+    const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+    const uniqueUsers = new Set(used.map((s) => s.scannedById).filter(Boolean)).size;
+    return {
+      unlocksToday: today.length,
+      mostPopularDrink: top?.[0] ?? '—',
+      uniqueUsers,
+      totalScans: used.length,
+    };
+  }
+
+  private async markExpired(sessionId: string) {
+    await this.prisma.qrSession.updateMany({
+      where: { id: sessionId, status: QrSessionStatus.ACTIVE },
+      data: { status: QrSessionStatus.EXPIRED },
+    });
+  }
+}

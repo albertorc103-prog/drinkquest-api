@@ -1,0 +1,50 @@
+import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
+import { FeedService } from './feed.service';
+
+@ApiTags('feed')
+@Controller('feed')
+export class FeedController {
+  constructor(private readonly feed: FeedService) {}
+
+  @Get()
+  list(@Query('page') page?: string) {
+    return this.feed.feed(parseInt(page ?? '1', 10));
+  }
+
+  @Get('trending')
+  trending() {
+    return this.feed.trending();
+  }
+
+  @Post('posts')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  create(@CurrentUser() user: JwtPayload, @Body() body: { body?: string; imageUrl?: string }) {
+    return this.feed.createPost(user.sub, body.body, body.imageUrl);
+  }
+
+  @Post('posts/:id/like')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  like(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.feed.like(id, user.sub);
+  }
+
+  @Post('posts/:id/comments')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  comment(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() body: { body: string }) {
+    return this.feed.comment(id, user.sub, body.body);
+  }
+
+  @Post('posts/:id/share')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  share(@Param('id') id: string) {
+    return this.feed.share(id);
+  }
+}

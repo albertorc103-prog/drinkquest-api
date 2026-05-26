@@ -1,0 +1,584 @@
+// DrinkQuest — PostgreSQL schema (UUID, soft delete, audit fields)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  BAR
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum ProfileVisibility {
+  PUBLIC
+  PRIVATE
+}
+
+enum FriendRequestStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  CANCELLED
+}
+
+enum QrSessionStatus {
+  ACTIVE
+  USED
+  EXPIRED
+}
+
+enum DrinkRarity {
+  COMMON
+  RARE
+  EPIC
+  LEGENDARY
+}
+
+enum MissionStatus {
+  LOCKED
+  IN_PROGRESS
+  COMPLETED
+  CLAIMED
+}
+
+enum ReportStatus {
+  OPEN
+  REVIEWING
+  RESOLVED
+  DISMISSED
+}
+
+enum ReportTargetType {
+  USER
+  POST
+  COMMENT
+  BAR
+  MESSAGE
+}
+
+enum NotificationType {
+  FRIEND_REQUEST
+  FRIEND_ACCEPTED
+  CHAT_MESSAGE
+  QR_UNLOCK
+  MISSION_COMPLETE
+  FEED_LIKE
+  FEED_COMMENT
+  SYSTEM
+}
+
+model User {
+  id                String            @id @default(uuid()) @db.Uuid
+  email             String            @unique
+  passwordHash      String            @map("password_hash")
+  displayName       String            @map("display_name")
+  bio               String?
+  avatarUrl         String?           @map("avatar_url")
+  role              Role              @default(USER)
+  profileVisibility ProfileVisibility @default(PUBLIC) @map("profile_visibility")
+  emailVerified     Boolean           @default(false) @map("email_verified")
+  emailVerifiedAt   DateTime?         @map("email_verified_at")
+  isOnline          Boolean           @default(false) @map("is_online")
+  lastSeenAt        DateTime?         @map("last_seen_at")
+  totalXp           Int               @default(0) @map("total_xp")
+  level             Int               @default(1)
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+  deletedAt         DateTime?         @map("deleted_at")
+
+  refreshTokens       RefreshToken[]
+  emailVerifications  EmailVerification[]
+  passwordResets      PasswordReset[]
+  bar                 Bar?
+  sentFriendRequests  FriendRequest[]     @relation("FriendRequestSender")
+  receivedFriendRequests FriendRequest[]  @relation("FriendRequestReceiver")
+  friendshipsA        Friendship[]          @relation("FriendshipUserA")
+  friendshipsB        Friendship[]          @relation("FriendshipUserB")
+  blocksInitiated     UserBlock[]           @relation("BlockInitiator")
+  blocksReceived      UserBlock[]           @relation("BlockTarget")
+  chatMemberships     ChatParticipant[]
+  messagesSent        ChatMessage[]
+  messageReads        MessageRead[]
+  drinkUnlocks        UserDrinkUnlock[]
+  drinkHistory        DrinkHistoryEntry[]
+  favoriteDrinks      UserFavoriteDrink[]
+  userMissions        UserMission[]
+  userAchievements    UserAchievement[]
+  posts               FeedPost[]
+  postLikes           PostLike[]
+  postComments        PostComment[]
+  notifications       Notification[]
+  reportsFiled        Report[]              @relation("ReportReporter")
+  reportsReceived     Report[]              @relation("ReportTargetUser")
+  qrSessionsScanned   QrSession[]           @relation("QrScannedBy")
+
+  @@index([email])
+  @@index([role])
+  @@index([deletedAt])
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  tokenHash String   @map("token_hash")
+  expiresAt DateTime @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@map("refresh_tokens")
+}
+
+model EmailVerification {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  tokenHash String   @map("token_hash")
+  expiresAt DateTime @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("email_verifications")
+}
+
+model PasswordReset {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  tokenHash String   @map("token_hash")
+  expiresAt DateTime @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_resets")
+}
+
+model Bar {
+  id           String   @id @default(uuid()) @db.Uuid
+  ownerUserId  String   @unique @map("owner_user_id") @db.Uuid
+  businessName String   @map("business_name")
+  slug         String   @unique
+  description  String?
+  address      String?
+  city         String?
+  country      String?
+  phone        String?
+  logoUrl      String?  @map("logo_url")
+  isVerified   Boolean  @default(false) @map("is_verified")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  deletedAt    DateTime? @map("deleted_at")
+
+  owner      User          @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  menuItems  BarMenuItem[]
+  qrSessions QrSession[]
+
+  @@index([slug])
+  @@index([deletedAt])
+  @@map("bars")
+}
+
+model DrinkCategory {
+  id        String   @id @default(uuid()) @db.Uuid
+  slug      String   @unique
+  name      String
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  drinks Drink[]
+
+  @@map("drink_categories")
+}
+
+model Drink {
+  id             String      @id @default(uuid()) @db.Uuid
+  legacyId       Int?        @unique @map("legacy_id")
+  slug           String      @unique
+  name           String
+  categoryId     String      @map("category_id") @db.Uuid
+  rarity         DrinkRarity @default(COMMON)
+  imageKey       String?     @map("image_key")
+  imageUrl       String?     @map("image_url")
+  description    String?
+  ingredients    String?
+  flavorProfile  String?     @map("flavor_profile")
+  alcoholLevel   String?     @map("alcohol_level")
+  baseAlcohol    String?     @map("base_alcohol")
+  difficulty     String?
+  xpReward       Int         @default(10) @map("xp_reward")
+  countryOrigin  String?     @map("country_origin")
+  isPalomaFamily Boolean     @default(false) @map("is_paloma_family")
+  containsMezcal Boolean     @default(false) @map("contains_mezcal")
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+  deletedAt      DateTime?   @map("deleted_at")
+
+  category       DrinkCategory     @relation(fields: [categoryId], references: [id])
+  barMenuItems   BarMenuItem[]
+  qrSessions     QrSession[]
+  unlocks        UserDrinkUnlock[]
+  history        DrinkHistoryEntry[]
+  favorites      UserFavoriteDrink[]
+
+  @@index([categoryId])
+  @@index([rarity])
+  @@index([deletedAt])
+  @@map("drinks")
+}
+
+model BarMenuItem {
+  id        String   @id @default(uuid()) @db.Uuid
+  barId     String   @map("bar_id") @db.Uuid
+  drinkId   String   @map("drink_id") @db.Uuid
+  active    Boolean  @default(true)
+  featured  Boolean  @default(false)
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  bar   Bar   @relation(fields: [barId], references: [id], onDelete: Cascade)
+  drink Drink @relation(fields: [drinkId], references: [id], onDelete: Cascade)
+
+  @@unique([barId, drinkId])
+  @@index([barId, active])
+  @@map("bar_menu_items")
+}
+
+model QrSession {
+  id          String          @id @default(uuid()) @db.Uuid
+  barId       String          @map("bar_id") @db.Uuid
+  drinkId     String          @map("drink_id") @db.Uuid
+  tokenHash   String          @map("token_hash")
+  status      QrSessionStatus @default(ACTIVE)
+  expiresAt   DateTime        @map("expires_at")
+  scannedById String?         @map("scanned_by_id") @db.Uuid
+  usedAt      DateTime?       @map("used_at")
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+
+  bar       Bar   @relation(fields: [barId], references: [id], onDelete: Cascade)
+  drink     Drink @relation(fields: [drinkId], references: [id], onDelete: Cascade)
+  scannedBy User? @relation("QrScannedBy", fields: [scannedById], references: [id])
+
+  @@index([barId, status])
+  @@index([expiresAt])
+  @@index([tokenHash])
+  @@map("qr_sessions")
+}
+
+model UserDrinkUnlock {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  drinkId    String   @map("drink_id") @db.Uuid
+  barId      String?  @map("bar_id") @db.Uuid
+  xpEarned   Int      @default(0) @map("xp_earned")
+  unlockedAt DateTime @default(now()) @map("unlocked_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  drink Drink @relation(fields: [drinkId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, drinkId])
+  @@index([userId])
+  @@map("user_drink_unlocks")
+}
+
+model DrinkHistoryEntry {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  drinkId   String   @map("drink_id") @db.Uuid
+  barId     String?  @map("bar_id") @db.Uuid
+  rating    Int?
+  notes     String?
+  loggedAt  DateTime @default(now()) @map("logged_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  drink Drink @relation(fields: [drinkId], references: [id], onDelete: Cascade)
+
+  @@index([userId, loggedAt])
+  @@map("drink_history_entries")
+}
+
+model UserFavoriteDrink {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  drinkId   String   @map("drink_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  drink Drink @relation(fields: [drinkId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, drinkId])
+  @@map("user_favorite_drinks")
+}
+
+model Mission {
+  id          String   @id @default(uuid()) @db.Uuid
+  slug        String   @unique
+  title       String
+  description String
+  triggerKey  String   @map("trigger_key")
+  targetCount Int      @default(1) @map("target_count")
+  xpReward    Int      @default(50) @map("xp_reward")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+
+  userMissions UserMission[]
+
+  @@map("missions")
+}
+
+model UserMission {
+  id          String        @id @default(uuid()) @db.Uuid
+  userId      String        @map("user_id") @db.Uuid
+  missionId   String        @map("mission_id") @db.Uuid
+  status      MissionStatus @default(LOCKED)
+  progress    Int           @default(0)
+  completedAt DateTime?     @map("completed_at")
+  claimedAt   DateTime?     @map("claimed_at")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mission Mission @relation(fields: [missionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, missionId])
+  @@map("user_missions")
+}
+
+model Achievement {
+  id          String   @id @default(uuid()) @db.Uuid
+  slug        String   @unique
+  title       String
+  description String
+  iconKey     String?  @map("icon_key")
+  xpReward    Int      @default(100) @map("xp_reward")
+  triggerKey  String   @map("trigger_key")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+
+  userAchievements UserAchievement[]
+
+  @@map("achievements")
+}
+
+model UserAchievement {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  achievementId String   @map("achievement_id") @db.Uuid
+  unlockedAt    DateTime @default(now()) @map("unlocked_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, achievementId])
+  @@map("user_achievements")
+}
+
+model FriendRequest {
+  id         String              @id @default(uuid()) @db.Uuid
+  senderId   String              @map("sender_id") @db.Uuid
+  receiverId String              @map("receiver_id") @db.Uuid
+  status     FriendRequestStatus @default(PENDING)
+  message    String?
+  createdAt  DateTime            @default(now()) @map("created_at")
+  updatedAt  DateTime            @updatedAt @map("updated_at")
+
+  sender   User @relation("FriendRequestSender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver User @relation("FriendRequestReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@unique([senderId, receiverId])
+  @@index([receiverId, status])
+  @@map("friend_requests")
+}
+
+model Friendship {
+  id        String   @id @default(uuid()) @db.Uuid
+  userAId   String   @map("user_a_id") @db.Uuid
+  userBId   String   @map("user_b_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  userA User @relation("FriendshipUserA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB User @relation("FriendshipUserB", fields: [userBId], references: [id], onDelete: Cascade)
+
+  @@unique([userAId, userBId])
+  @@map("friendships")
+}
+
+model UserBlock {
+  id          String   @id @default(uuid()) @db.Uuid
+  initiatorId String   @map("initiator_id") @db.Uuid
+  targetId    String   @map("target_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  initiator User @relation("BlockInitiator", fields: [initiatorId], references: [id], onDelete: Cascade)
+  target    User @relation("BlockTarget", fields: [targetId], references: [id], onDelete: Cascade)
+
+  @@unique([initiatorId, targetId])
+  @@map("user_blocks")
+}
+
+model ChatRoom {
+  id        String   @id @default(uuid()) @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  participants ChatParticipant[]
+  messages     ChatMessage[]
+
+  @@map("chat_rooms")
+}
+
+model ChatParticipant {
+  id        String   @id @default(uuid()) @db.Uuid
+  roomId    String   @map("room_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  joinedAt  DateTime @default(now()) @map("joined_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  room ChatRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, userId])
+  @@map("chat_participants")
+}
+
+model ChatMessage {
+  id          String   @id @default(uuid()) @db.Uuid
+  roomId      String   @map("room_id") @db.Uuid
+  senderId    String   @map("sender_id") @db.Uuid
+  body        String?
+  imageUrl    String?  @map("image_url")
+  imageKey    String?  @map("image_key")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+
+  room   ChatRoom      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  sender User          @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  reads  MessageRead[]
+
+  @@index([roomId, createdAt])
+  @@map("chat_messages")
+}
+
+model MessageRead {
+  id        String   @id @default(uuid()) @db.Uuid
+  messageId String   @map("message_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  readAt    DateTime @default(now()) @map("read_at")
+
+  message ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@map("message_reads")
+}
+
+model FeedPost {
+  id         String   @id @default(uuid()) @db.Uuid
+  authorId   String   @map("author_id") @db.Uuid
+  body       String?
+  imageUrl   String?  @map("image_url")
+  imageKey   String?  @map("image_key")
+  shareCount Int      @default(0) @map("share_count")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+  deletedAt  DateTime? @map("deleted_at")
+
+  author   User           @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  likes    PostLike[]
+  comments PostComment[]
+
+  @@index([createdAt])
+  @@index([authorId])
+  @@map("feed_posts")
+}
+
+model PostLike {
+  id        String   @id @default(uuid()) @db.Uuid
+  postId    String   @map("post_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  post FeedPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId])
+  @@map("post_likes")
+}
+
+model PostComment {
+  id        String   @id @default(uuid()) @db.Uuid
+  postId    String   @map("post_id") @db.Uuid
+  authorId  String   @map("author_id") @db.Uuid
+  body      String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  post   FeedPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([postId])
+  @@map("post_comments")
+}
+
+model Report {
+  id           String           @id @default(uuid()) @db.Uuid
+  reporterId   String           @map("reporter_id") @db.Uuid
+  targetType   ReportTargetType @map("target_type")
+  targetUserId String?          @map("target_user_id") @db.Uuid
+  targetPostId String?          @map("target_post_id") @db.Uuid
+  reason       String
+  status       ReportStatus     @default(OPEN)
+  adminNotes   String?          @map("admin_notes")
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @updatedAt @map("updated_at")
+
+  reporter   User  @relation("ReportReporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  targetUser User? @relation("ReportTargetUser", fields: [targetUserId], references: [id])
+
+  @@index([status])
+  @@map("reports")
+}
+
+model Notification {
+  id        String           @id @default(uuid()) @db.Uuid
+  userId    String           @map("user_id") @db.Uuid
+  type      NotificationType
+  title     String
+  body      String?
+  payload   Json?
+  readAt    DateTime?        @map("read_at")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+  @@map("notifications")
+}

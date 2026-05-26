@@ -1,0 +1,36 @@
+# Never copy host node_modules (Windows/macOS binaries break Linux — bcrypt, etc.)
+node_modules
+**/node_modules
+
+# Build output — compiled inside the image
+dist
+**/dist
+
+# Logs & local env
+logs
+*.log
+.env
+.env.*
+!.env.example
+
+# Git & IDE
+.git
+.gitignore
+.cursor
+.vscode
+.idea
+
+# Tests & coverage (not needed in image)
+coverage
+.nyc_output
+test
+**/*.spec.ts
+
+# Docs (optional slim context)
+docs
+*.md
+!README.md
+
+# Docker meta (avoid recursive noise)
+Dockerfile*
+docker-compose*.yml
