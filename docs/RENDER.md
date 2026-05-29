@@ -62,6 +62,10 @@ MINIO_BUCKET=drinkquest
 MINIO_PUBLIC_URL=https://tu-bucket.s3.amazonaws.com/drinkquest
 
 MAIL_ENABLED=false
+
+# Opcional: admin creado automáticamente en cada deploy (seed idempotente)
+SEED_ADMIN_EMAIL=admin@drinkquest.app
+SEED_ADMIN_PASSWORD=<cambia-esto-en-produccion>
 ```
 
 **Notas:**
@@ -70,7 +74,10 @@ MAIL_ENABLED=false
 - `JWT_SECRET` opcional si defines `JWT_ACCESS_SECRET` y `JWT_REFRESH_SECRET`.
 - Apps **Android/iOS** no dependen de CORS; `CORS_ORIGINS` es para clientes web.
 - Define `APP_URL=https://TU-SERVICIO.onrender.com`: el backend también permite ese origen (Swagger en `/docs`) además de los hosts de dev y `https://drinkquest-api.onrender.com`.
-- Tras el primer deploy: `npm run seed` solo si la tabla `drinks` está vacía (ejecutar en shell de Render o local contra `DATABASE_URL`).
+- **Seed automático en cada deploy** (plan Free sin Shell): `render:start` ejecuta `prisma migrate deploy` + seed idempotente antes de levantar la API. No hace falta shell manual.
+- Admin por defecto (creado/actualizado en seed): `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` (defaults `admin@drinkquest.app` / `ChangeMeAdmin123!`).
+- Bebidas demo solo se insertan si la tabla `drinks` está vacía.
+- Para omitir seed en un arranque: `SKIP_DB_SEED=1`.
 
 ## 4. Redis y MinIO en Render
 

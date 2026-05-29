@@ -12,6 +12,7 @@ services:
     rootDir: backend
     buildCommand: npm ci && npm run render:build
     startCommand: npm run render:start
+    # render:start → migrate deploy + seed (admin idempotente) + node dist/main.js
     healthCheckPath: /api/v1/health
     envVars:
       - key: NODE_ENV

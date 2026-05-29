@@ -119,6 +119,7 @@ async function seedAdminUser(): Promise<string> {
   const adminEmail = process.env.SEED_ADMIN_EMAIL ?? 'admin@drinkquest.app';
   const adminPass = process.env.SEED_ADMIN_PASSWORD ?? 'ChangeMeAdmin123!';
   const passwordHash = await hashPassword(adminPass);
+  const existing = await prisma.user.findUnique({ where: { email: adminEmail } });
   await prisma.user.upsert({
     where: { email: adminEmail },
     create: {
@@ -129,8 +130,15 @@ async function seedAdminUser(): Promise<string> {
       emailVerified: true,
       emailVerifiedAt: new Date(),
     },
-    update: { role: Role.SUPER_ADMIN },
+    // Idempotente: no sobrescribe passwordHash si el admin ya existe (evita resets en cada deploy).
+    update: {
+      role: Role.SUPER_ADMIN,
+      displayName: 'DrinkQuest Admin',
+      emailVerified: true,
+      emailVerifiedAt: existing?.emailVerifiedAt ?? new Date(),
+    },
   });
+  console.log(`✅ Admin listo: ${adminEmail} (${existing ? 'actualizado' : 'creado'})`);
   return adminEmail;
 }
 
