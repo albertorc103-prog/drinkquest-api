@@ -70,10 +70,10 @@ async function bootstrap() {
     next();
   });
 
-  app.enableCors(buildCorsOptions(nodeEnv, corsOriginsRaw || '*'));
+  app.enableCors(buildCorsOptions(nodeEnv, corsOriginsRaw, publicUrl));
 
   app.useWebSocketAdapter(
-    new ConfigurableIoAdapter(app, nodeEnv, corsOriginsRaw || '*'),
+    new ConfigurableIoAdapter(app, nodeEnv, corsOriginsRaw, publicUrl),
   );
 
   app.useGlobalPipes(

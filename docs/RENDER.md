@@ -48,7 +48,8 @@ JWT_REFRESH_SECRET=<openssl rand -base64 64>
 APP_URL=https://TU-SERVICIO.onrender.com
 API_BASE_URL=https://TU-SERVICIO.onrender.com/api/v1
 
-CORS_ORIGINS=https://tu-web.com
+# Frontend web + (opcional) el propio host de la API para Swagger /docs
+CORS_ORIGINS=https://tu-web.com,https://TU-SERVICIO.onrender.com
 
 REDIS_URL=redis://:password@host:6379
 
@@ -68,6 +69,7 @@ MAIL_ENABLED=false
 - `PORT` lo asigna Render automáticamente; no hace falta fijarlo manualmente.
 - `JWT_SECRET` opcional si defines `JWT_ACCESS_SECRET` y `JWT_REFRESH_SECRET`.
 - Apps **Android/iOS** no dependen de CORS; `CORS_ORIGINS` es para clientes web.
+- Define `APP_URL=https://TU-SERVICIO.onrender.com`: el backend también permite ese origen (Swagger en `/docs`) además de los hosts de dev y `https://drinkquest-api.onrender.com`.
 - Tras el primer deploy: `npm run seed` solo si la tabla `drinks` está vacía (ejecutar en shell de Render o local contra `DATABASE_URL`).
 
 ## 4. Redis y MinIO en Render

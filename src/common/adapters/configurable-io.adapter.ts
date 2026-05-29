@@ -9,6 +9,7 @@ export class ConfigurableIoAdapter extends IoAdapter {
     app: INestApplication,
     private readonly nodeEnv: string,
     private readonly corsOriginsRaw: string,
+    private readonly appPublicUrl?: string,
   ) {
     super(app);
   }
@@ -16,7 +17,7 @@ export class ConfigurableIoAdapter extends IoAdapter {
   createIOServer(port: number, options?: ServerOptions) {
     return super.createIOServer(port, {
       ...options,
-      cors: buildSocketIoCorsOptions(this.nodeEnv, this.corsOriginsRaw),
+      cors: buildSocketIoCorsOptions(this.nodeEnv, this.corsOriginsRaw, this.appPublicUrl),
     });
   }
 }

@@ -1,11 +1,41 @@
 import type { CorsOptions } from '@nestjs/common/interfaces/external/cors-options.interface';
 
+/** Orígenes típicos de desarrollo (localhost + emulador Android). */
+export const DEFAULT_DEV_CORS_ORIGINS = [
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'http://10.0.2.2:3000',
+] as const;
+
+/** Producción Render (Swagger UI y requests desde el mismo host de la API). */
+export const DEFAULT_RENDER_API_ORIGIN = 'https://drinkquest-api.onrender.com';
+
+function stripTrailingSlash(value: string): string {
+  return value.replace(/\/+$/, '');
+}
+
 /** Parsea lista separada por comas de orígenes CORS. */
 export function parseCorsOrigins(raw: string): string[] {
   return raw
     .split(',')
-    .map((s) => s.trim())
+    .map((s) => stripTrailingSlash(s.trim()))
     .filter(Boolean);
+}
+
+/**
+ * Combina CORS_ORIGINS con orígenes de dev y la URL pública de la API (Swagger en /docs).
+ */
+export function mergeCorsOrigins(corsOriginsRaw: string, appPublicUrl?: string): string[] {
+  const merged = new Set<string>([
+    ...DEFAULT_DEV_CORS_ORIGINS,
+    DEFAULT_RENDER_API_ORIGIN,
+    ...parseCorsOrigins(corsOriginsRaw),
+  ]);
+  if (appPublicUrl?.trim()) {
+    merged.add(stripTrailingSlash(appPublicUrl.trim()));
+  }
+  merged.delete('*');
+  return [...merged];
 }
 
 /**
@@ -16,18 +46,22 @@ export function parseCorsOrigins(raw: string): string[] {
  * - Desarrollo: `*` o vacío → cualquier origen (`origin: true`).
  *   DrinkQuest usa Bearer JWT; `credentials: true` queda para cookies futuras.
  */
-export function buildCorsOptions(nodeEnv: string, corsOriginsRaw: string): CorsOptions {
-  const origins = parseCorsOrigins(corsOriginsRaw);
+export function buildCorsOptions(
+  nodeEnv: string,
+  corsOriginsRaw: string,
+  appPublicUrl?: string,
+): CorsOptions {
+  const envOrigins = parseCorsOrigins(corsOriginsRaw);
   const isProduction = nodeEnv === 'production';
-  const allowAll = origins.length === 0 || origins.includes('*');
+  const allowAll = envOrigins.length === 0 && !corsOriginsRaw.trim();
 
-  if (isProduction && allowAll) {
+  if (isProduction && allowAll && !appPublicUrl?.trim()) {
     throw new Error(
       'CORS_ORIGINS must list explicit origins in production (e.g. https://app.example.com). Wildcard * is not allowed.',
     );
   }
 
-  if (!isProduction && allowAll) {
+  if (!isProduction && (allowAll || envOrigins.includes('*'))) {
     return {
       origin: true,
       credentials: true,
@@ -35,7 +69,7 @@ export function buildCorsOptions(nodeEnv: string, corsOriginsRaw: string): CorsO
     };
   }
 
-  const allowed = new Set(origins);
+  const allowed = new Set(mergeCorsOrigins(corsOriginsRaw, appPublicUrl));
 
   return {
     origin: (origin, callback) => {
@@ -59,8 +93,9 @@ export function buildCorsOptions(nodeEnv: string, corsOriginsRaw: string): CorsO
 export function buildSocketIoCorsOptions(
   nodeEnv: string,
   corsOriginsRaw: string,
+  appPublicUrl?: string,
 ): { origin: CorsOptions['origin']; credentials: boolean } {
-  const http = buildCorsOptions(nodeEnv, corsOriginsRaw);
+  const http = buildCorsOptions(nodeEnv, corsOriginsRaw, appPublicUrl);
   return {
     origin: http.origin,
     credentials: http.credentials ?? true,
