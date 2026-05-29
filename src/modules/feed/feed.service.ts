@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { NotificationType } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -11,7 +11,16 @@ export class FeedService {
   ) {}
 
   async createPost(authorId: string, body?: string, imageUrl?: string) {
-    return this.prisma.feedPost.create({ data: { authorId, body, imageUrl } });
+    if (!body?.trim() && !imageUrl) {
+      throw new BadRequestException('La publicación necesita texto o imagen');
+    }
+    return this.prisma.feedPost.create({
+      data: { authorId, body: body?.trim() || null, imageUrl },
+      include: {
+        author: { select: { id: true, displayName: true, avatarUrl: true } },
+        _count: { select: { likes: true, comments: true } },
+      },
+    });
   }
 
   async feed(page = 1, limit = 20) {

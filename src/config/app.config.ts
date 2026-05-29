@@ -54,6 +54,11 @@ export default registerAs('app', () => {
     /** Full API path prefix including version (e.g. api/v1). Not combined with Nest URI versioning. */
     prefix,
     corsOrigins: process.env.CORS_ORIGINS ?? '',
+    /** Detrás de Cloudflare/Render: true o número de saltos proxy. */
+    trustProxy:
+      process.env.TRUST_PROXY === 'true' ||
+      process.env.TRUST_PROXY === '1' ||
+      nodeEnv === 'production',
     nodeEnv,
     qrSessionTtlMinutes: parseInt(process.env.QR_SESSION_TTL_MINUTES ?? '10', 10),
   };

@@ -1,9 +1,4 @@
-import {
-  BadRequestException,
-  ForbiddenException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DrinkRarity, QrSessionStatus, Role } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
@@ -11,6 +6,7 @@ import { randomToken, sha256 } from '../../common/utils/crypto.util';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '@prisma/client';
 import { MissionsService } from '../missions/missions.service';
+import { BarAccessService } from '../subscriptions/bar-access.service';
 
 export interface QrPayloadResponse {
   sessionId: string;
@@ -24,21 +20,21 @@ export interface QrPayloadResponse {
 
 @Injectable()
 export class QrService {
+  private readonly logger = new Logger(QrService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly notifications: NotificationsService,
     private readonly missions: MissionsService,
+    private readonly barAccess: BarAccessService,
   ) {}
 
   async createSession(
     barOwnerId: string,
     opts: { drinkId?: string; legacyDrinkId?: number },
   ): Promise<QrPayloadResponse> {
-    const bar = await this.prisma.bar.findFirst({
-      where: { ownerUserId: barOwnerId, deletedAt: null, isActive: true },
-    });
-    if (!bar) throw new ForbiddenException('Bar no autorizado');
+    const { bar } = await this.barAccess.assertOwnerCanGenerateQr(barOwnerId);
 
     const drink = opts.drinkId
       ? await this.prisma.drink.findFirst({ where: { id: opts.drinkId, deletedAt: null } })
@@ -66,6 +62,16 @@ export class QrService {
         status: QrSessionStatus.ACTIVE,
       },
     });
+
+    this.logger.log(
+      JSON.stringify({
+        event: 'qr_generate',
+        ownerUserId: barOwnerId,
+        barId: bar.id,
+        sessionId: session.id,
+        drinkId,
+      }),
+    );
 
     return {
       sessionId: session.id,
@@ -141,6 +147,16 @@ export class QrService {
       '¡Bebida desbloqueada!',
       session.drink.name,
       { drinkId: session.drinkId, barId: session.barId },
+    );
+
+    this.logger.log(
+      JSON.stringify({
+        event: 'qr_redeem',
+        userId,
+        sessionId: session.id,
+        barId: session.barId,
+        drinkId: session.drinkId,
+      }),
     );
 
     return {

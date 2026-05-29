@@ -11,7 +11,11 @@ import { Role } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { hashPassword, randomToken, sha256, slugify, verifyPassword } from '../../common/utils/crypto.util';
 import { MailService } from '../notifications/mail.service';
+import { BarSubscriptionService } from '../subscriptions/bar-subscription.service';
+import { JwtBarClaimsService } from '../subscriptions/jwt-bar-claims.service';
 import { RegisterDto } from './dto/register.dto';
+import { validateLoginIntent } from './auth-login-intent.util';
+import { AuthLoginIntent } from './enums/auth-login-intent.enum';
 import { JwtPayload, TokenPair } from './interfaces/jwt-payload.interface';
 
 @Injectable()
@@ -23,6 +27,8 @@ export class AuthService {
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     private readonly mail: MailService,
+    private readonly subscriptions: BarSubscriptionService,
+    private readonly jwtBarClaims: JwtBarClaimsService,
   ) {}
 
   async register(dto: RegisterDto) {
@@ -52,13 +58,14 @@ export class AuthService {
         while (await tx.bar.findUnique({ where: { slug } })) {
           slug = `${baseSlug}-${n++}`;
         }
-        await tx.bar.create({
+        const bar = await tx.bar.create({
           data: {
             ownerUserId: created.id,
             businessName: dto.businessName!.trim(),
             slug,
           },
         });
+        await this.subscriptions.createTrialSubscription(bar.id, tx);
       }
       return created;
     });
@@ -69,17 +76,41 @@ export class AuthService {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.warn(`Register OK but verification email failed: ${message}`);
     }
-    return this.issueTokens({ sub: user.id, email: user.email, role: user.role });
+    return this.issueTokensForUser(user.id, user.email, user.role);
   }
 
-  async login(email: string, password: string): Promise<TokenPair> {
+  async login(email: string, password: string, intent: AuthLoginIntent): Promise<TokenPair> {
     const user = await this.prisma.user.findFirst({
       where: { email: email.trim().toLowerCase(), deletedAt: null },
     });
     if (!user || !(await verifyPassword(password, user.passwordHash))) {
       throw new UnauthorizedException('Credenciales incorrectas');
     }
-    return this.issueTokens({ sub: user.id, email: user.email, role: user.role });
+    const bar =
+      intent === AuthLoginIntent.BAR
+        ? await this.prisma.bar.findFirst({
+            where: { ownerUserId: user.id, deletedAt: null },
+            select: { id: true },
+          })
+        : null;
+    this.assertLoginIntent(user.role, bar, intent);
+    this.logger.log(
+      JSON.stringify({
+        event: 'auth_login',
+        userId: user.id,
+        role: user.role,
+        intent,
+      }),
+    );
+    return this.issueTokensForUser(user.id, user.email, user.role);
+  }
+
+  private assertLoginIntent(
+    role: Role,
+    bar: { id: string } | null,
+    intent: AuthLoginIntent,
+  ): void {
+    validateLoginIntent(role, intent, bar != null);
   }
 
   async refresh(refreshToken: string): Promise<TokenPair> {
@@ -95,11 +126,14 @@ export class AuthService {
       where: { id: stored.id },
       data: { revokedAt: new Date() },
     });
-    return this.issueTokens({
-      sub: stored.user.id,
-      email: stored.user.email,
-      role: stored.user.role,
-    });
+    this.logger.log(
+      JSON.stringify({
+        event: 'auth_refresh',
+        userId: stored.user.id,
+        role: stored.user.role,
+      }),
+    );
+    return this.issueTokensForUser(stored.user.id, stored.user.email, stored.user.role);
   }
 
   async forgotPassword(email: string): Promise<{ message: string }> {
@@ -178,6 +212,15 @@ export class AuthService {
       },
     });
     await this.mail.sendEmailVerification(email, token);
+  }
+
+  private async issueTokensForUser(
+    userId: string,
+    email: string,
+    role: Role,
+  ): Promise<TokenPair> {
+    const barClaims = await this.jwtBarClaims.buildForUser(userId, role);
+    return this.issueTokens({ sub: userId, email, role, ...barClaims });
   }
 
   private async issueTokens(payload: JwtPayload): Promise<TokenPair> {

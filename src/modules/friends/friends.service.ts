@@ -1,14 +1,15 @@
 import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
-import { FriendRequestStatus } from '@prisma/client';
+import { FriendRequestStatus, NotificationType } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
+import { RealtimeHub } from '../../common/realtime/realtime-hub.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { NotificationType } from '@prisma/client';
 
 @Injectable()
 export class FriendsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
+    private readonly realtime: RealtimeHub,
   ) {}
 
   private async isBlocked(a: string, b: string) {
@@ -21,6 +22,28 @@ export class FriendsService {
       },
     });
     return !!block;
+  }
+
+  private async pushSummary(userId: string) {
+    const [chatUnread, pendingRequests, notificationUnread] = await Promise.all([
+      this.prisma.chatMessage.count({
+        where: {
+          deletedAt: null,
+          senderId: { not: userId },
+          room: { participants: { some: { userId } } },
+          reads: { none: { userId } },
+        },
+      }),
+      this.prisma.friendRequest.count({
+        where: { receiverId: userId, status: FriendRequestStatus.PENDING },
+      }),
+      this.prisma.notification.count({ where: { userId, readAt: null } }),
+    ]);
+    this.realtime.emitToUser(userId, 'messenger_summary', {
+      chatUnread,
+      pendingRequests,
+      notificationUnread,
+    });
   }
 
   async sendRequest(senderId: string, receiverId: string, message?: string) {
@@ -38,8 +61,23 @@ export class FriendsService {
       where: { senderId_receiverId: { senderId, receiverId } },
       create: { senderId, receiverId, message, status: FriendRequestStatus.PENDING },
       update: { status: FriendRequestStatus.PENDING, message },
+      include: { sender: { select: { id: true, displayName: true, avatarUrl: true } } },
     });
-    await this.notifications.create(receiverId, NotificationType.FRIEND_REQUEST, 'Nueva solicitud de amistad');
+    const notif = await this.notifications.create(
+      receiverId,
+      NotificationType.FRIEND_REQUEST,
+      'Nueva solicitud de amistad',
+      req.sender.displayName,
+      { requestId: req.id, senderId },
+    );
+    await this.pushSummary(receiverId);
+    this.realtime.emitToUser(receiverId, 'notification', {
+      type: NotificationType.FRIEND_REQUEST,
+      title: 'Nueva solicitud de amistad',
+      body: req.sender.displayName,
+      requestId: req.id,
+      notificationId: notif.id,
+    });
     return req;
   }
 
@@ -49,10 +87,12 @@ export class FriendsService {
     if (req.status !== FriendRequestStatus.PENDING) throw new BadRequestException('Solicitud ya procesada');
 
     if (!accept) {
-      return this.prisma.friendRequest.update({
+      const updated = await this.prisma.friendRequest.update({
         where: { id: requestId },
         data: { status: FriendRequestStatus.REJECTED },
       });
+      await this.pushSummary(receiverId);
+      return updated;
     }
 
     const [userAId, userBId] = req.senderId < req.receiverId
@@ -70,8 +110,37 @@ export class FriendsService {
         update: {},
       }),
     ]);
-    await this.notifications.create(req.senderId, NotificationType.FRIEND_ACCEPTED, 'Solicitud aceptada');
+    const notif = await this.notifications.create(
+      req.senderId,
+      NotificationType.FRIEND_ACCEPTED,
+      'Solicitud aceptada',
+      'Ya sois amigos',
+      { requestId },
+    );
+    await this.pushSummary(req.senderId);
+    await this.pushSummary(receiverId);
+    this.realtime.emitToUser(req.senderId, 'notification', {
+      type: NotificationType.FRIEND_ACCEPTED,
+      title: 'Solicitud aceptada',
+      body: 'Ya sois amigos',
+      requestId,
+      notificationId: notif.id,
+    });
     return friendship;
+  }
+
+  async cancelRequest(senderId: string, requestId: string) {
+    const req = await this.prisma.friendRequest.findUnique({ where: { id: requestId } });
+    if (!req || req.senderId !== senderId) throw new ForbiddenException();
+    if (req.status !== FriendRequestStatus.PENDING) {
+      throw new BadRequestException('Solo puedes cancelar solicitudes pendientes');
+    }
+    const updated = await this.prisma.friendRequest.update({
+      where: { id: requestId },
+      data: { status: FriendRequestStatus.CANCELLED },
+    });
+    await this.pushSummary(req.receiverId);
+    return updated;
   }
 
   async listFriends(userId: string) {
@@ -86,6 +155,15 @@ export class FriendsService {
     return this.prisma.friendRequest.findMany({
       where: { receiverId: userId, status: FriendRequestStatus.PENDING },
       include: { sender: { select: { id: true, displayName: true, avatarUrl: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async sentRequests(userId: string) {
+    return this.prisma.friendRequest.findMany({
+      where: { senderId: userId, status: FriendRequestStatus.PENDING },
+      include: { receiver: { select: { id: true, displayName: true, avatarUrl: true } } },
+      orderBy: { createdAt: 'desc' },
     });
   }
 

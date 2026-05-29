@@ -29,7 +29,21 @@ export class AdminService {
   async listBars() {
     return this.prisma.bar.findMany({
       where: { deletedAt: null },
-      include: { owner: { select: { email: true, displayName: true } } },
+      include: {
+        owner: { select: { email: true, displayName: true } },
+        subscription: {
+          select: {
+            id: true,
+            status: true,
+            plan: true,
+            trialEndsAt: true,
+            currentPeriodEnd: true,
+            qrEnabled: true,
+            promoEnabled: true,
+            lastStatusChangedAt: true,
+          },
+        },
+      },
     });
   }
 

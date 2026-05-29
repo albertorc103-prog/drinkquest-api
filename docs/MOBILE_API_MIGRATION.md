@@ -12,23 +12,14 @@
 
 ## Configurar URL
 
-En `local.properties` del proyecto Android:
+Por defecto **debug y release** apuntan a Render. En `local.properties` (opcional):
 
 ```properties
-API_BASE_URL=http://10.0.2.2:3000/api/v1
+API_BASE_URL_PROD=https://drinkquest-api.onrender.com/api/v1
+API_BASE_URL_DEV=https://drinkquest-api.onrender.com/api/v1
 ```
 
-Dispositivo físico (misma Wi‑Fi que el PC):
-
-```properties
-API_BASE_URL=http://192.168.1.X:3000/api/v1
-```
-
-Producción:
-
-```properties
-API_BASE_URL=https://api.tudominio.com/api/v1
-```
+Solo si necesitas un backend local explícito, override `API_BASE_URL_DEV` con tu URL HTTPS.
 
 ## Flujo QR (compatible con app actual)
 

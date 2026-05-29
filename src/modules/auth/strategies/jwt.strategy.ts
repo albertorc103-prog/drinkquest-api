@@ -23,6 +23,15 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       where: { id: payload.sub, deletedAt: null },
     });
     if (!user) throw new UnauthorizedException('Usuario no encontrado');
-    return { sub: user.id, email: user.email, role: user.role };
+    return {
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+      barId: payload.barId,
+      subscriptionStatus: payload.subscriptionStatus,
+      subscriptionPlan: payload.subscriptionPlan,
+      qrEnabled: payload.qrEnabled,
+      promoEnabled: payload.promoEnabled,
+    };
   }
 }

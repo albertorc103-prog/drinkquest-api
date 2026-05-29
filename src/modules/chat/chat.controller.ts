@@ -12,6 +12,11 @@ import { ChatService } from './chat.service';
 export class ChatController {
   constructor(private readonly chat: ChatService) {}
 
+  @Get('summary')
+  summary(@CurrentUser() user: JwtPayload) {
+    return this.chat.getSummary(user.sub);
+  }
+
   @Get('rooms')
   rooms(@CurrentUser() user: JwtPayload) {
     return this.chat.myRooms(user.sub);
@@ -32,7 +37,7 @@ export class ChatController {
   }
 
   @Post('rooms/:roomId/messages')
-  send(
+  async send(
     @CurrentUser() user: JwtPayload,
     @Param('roomId') roomId: string,
     @Body() body: { body?: string; imageUrl?: string },
@@ -40,8 +45,17 @@ export class ChatController {
     return this.chat.sendMessage(roomId, user.sub, body.body, body.imageUrl);
   }
 
+  @Post('rooms/:roomId/read')
+  readRoom(@CurrentUser() user: JwtPayload, @Param('roomId') roomId: string) {
+    return this.chat.markRoomRead(roomId, user.sub);
+  }
+
   @Post('messages/:messageId/read')
-  read(@CurrentUser() user: JwtPayload, @Param('messageId') messageId: string) {
-    return this.chat.markRead(messageId, user.sub);
+  read(
+    @CurrentUser() user: JwtPayload,
+    @Param('messageId') messageId: string,
+    @Body() body: { roomId?: string },
+  ) {
+    return this.chat.markRead(messageId, user.sub, body.roomId);
   }
 }

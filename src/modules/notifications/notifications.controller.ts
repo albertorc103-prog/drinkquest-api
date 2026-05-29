@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Patch, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -17,8 +17,18 @@ export class NotificationsController {
     return this.notifications.list(user.sub, parseInt(page ?? '1', 10));
   }
 
+  @Get('unread-count')
+  unreadCount(@CurrentUser() user: JwtPayload) {
+    return this.notifications.unreadCount(user.sub);
+  }
+
   @Patch(':id/read')
   markRead(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.notifications.markRead(user.sub, id);
+  }
+
+  @Post('read-all')
+  markAllRead(@CurrentUser() user: JwtPayload) {
+    return this.notifications.markAllRead(user.sub);
   }
 }

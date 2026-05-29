@@ -28,7 +28,7 @@ export class AuthController {
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiOperation({ summary: 'Login' })
   login(@Body() dto: LoginDto) {
-    return this.auth.login(dto.email, dto.password);
+    return this.auth.login(dto.email, dto.password, dto.intent);
   }
 
   @Post('refresh')

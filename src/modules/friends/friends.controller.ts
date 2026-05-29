@@ -22,6 +22,11 @@ export class FriendsController {
     return this.friends.pendingRequests(user.sub);
   }
 
+  @Get('requests/sent')
+  sentRequests(@CurrentUser() user: JwtPayload) {
+    return this.friends.sentRequests(user.sub);
+  }
+
   @Post('requests')
   send(@CurrentUser() user: JwtPayload, @Body() body: { receiverId: string; message?: string }) {
     return this.friends.sendRequest(user.sub, body.receiverId, body.message);
@@ -35,6 +40,11 @@ export class FriendsController {
   @Post('requests/:id/reject')
   reject(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.friends.respond(user.sub, id, false);
+  }
+
+  @Post('requests/:id/cancel')
+  cancel(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.friends.cancelRequest(user.sub, id);
   }
 
   @Post('block')

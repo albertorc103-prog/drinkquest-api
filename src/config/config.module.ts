@@ -6,12 +6,21 @@ import databaseConfig from './database.config';
 import minioConfig from './minio.config';
 import redisConfig from './redis.config';
 import smtpConfig from './smtp.config';
+import subscriptionConfig from './subscription.config';
 
 @Global()
 @Module({
   imports: [
     ConfigModule.forRoot({
-      load: [appConfig, authConfig, databaseConfig, redisConfig, minioConfig, smtpConfig],
+      load: [
+        appConfig,
+        authConfig,
+        databaseConfig,
+        redisConfig,
+        minioConfig,
+        smtpConfig,
+        subscriptionConfig,
+      ],
     }),
   ],
   exports: [ConfigModule],

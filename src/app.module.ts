@@ -1,7 +1,9 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
+import { RequestLoggingInterceptor } from './common/interceptors/request-logging.interceptor';
 import { AdminModule } from './modules/admin/admin.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { BarsModule } from './modules/bars/bars.module';
@@ -11,6 +13,7 @@ import { FeedModule } from './modules/feed/feed.module';
 import { FriendsModule } from './modules/friends/friends.module';
 import { MissionsModule } from './modules/missions/missions.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { PromotionsModule } from './modules/promotions/promotions.module';
 import { QrModule } from './modules/qr/qr.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
 import { UsersModule } from './modules/users/users.module';
@@ -18,6 +21,7 @@ import { AppConfigModule } from './config/config.module';
 import { DatabaseModule } from './database/database.module';
 import { HealthModule } from './common/health/health.module';
 import { RedisModule } from './common/redis/redis.module';
+import { RealtimeModule } from './common/realtime/realtime.module';
 import { LoggerModule } from './common/logger/logger.module';
 import { SocketsModule } from './sockets/sockets.module';
 
@@ -28,6 +32,7 @@ import { SocketsModule } from './sockets/sockets.module';
     LoggerModule,
     DatabaseModule,
     RedisModule,
+    RealtimeModule,
     ThrottlerModule.forRootAsync({
       inject: [],
       useFactory: () => [
@@ -48,10 +53,15 @@ import { SocketsModule } from './sockets/sockets.module';
     FeedModule,
     BarsModule,
     AdminModule,
+    PromotionsModule,
     NotificationsModule,
     UploadsModule,
     SocketsModule,
   ],
-  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
+  providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_FILTER, useClass: GlobalExceptionFilter },
+    { provide: APP_INTERCEPTOR, useClass: RequestLoggingInterceptor },
+  ],
 })
 export class AppModule {}

@@ -27,12 +27,27 @@ export class StorageService {
     });
   }
 
+  private cacheControlForFolder(folder: string): string {
+    switch (folder) {
+      case 'avatars':
+        return 'public, max-age=86400';
+      case 'feed':
+      case 'chat':
+        return 'public, max-age=604800, immutable';
+      case 'drinks':
+        return 'public, max-age=31536000, immutable';
+      default:
+        return 'public, max-age=86400';
+    }
+  }
+
   async presignUpload(folder: string, contentType: string, extension = 'jpg') {
     const key = `${folder}/${randomUUID()}.${extension}`;
     const command = new PutObjectCommand({
       Bucket: this.bucket,
       Key: key,
       ContentType: contentType,
+      CacheControl: this.cacheControlForFolder(folder),
     });
     const uploadUrl = await getSignedUrl(this.client, command, { expiresIn: 900 });
     const publicUrl = `${this.publicUrl}/${key}`;

@@ -3,6 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import * as compression from 'compression';
+import { randomUUID } from 'crypto';
+import { NextFunction, Request, Response } from 'express';
 import helmet from 'helmet';
 import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
 import { AppModule } from './app.module';
@@ -23,14 +25,50 @@ async function bootstrap() {
   const publicUrl = config.get<string>('app.url', '');
   const apiBaseUrl = config.get<string>('app.apiBaseUrl', '');
 
-  if (nodeEnv === 'production') {
-    app.getHttpAdapter().getInstance().set('trust proxy', 1);
+  const trustProxy = config.get<boolean>('app.trustProxy', nodeEnv === 'production');
+  if (trustProxy) {
+    app.getHttpAdapter().getInstance().set('trust proxy', true);
   }
 
   // Version lives in API_PREFIX (e.g. api/v1). Do not enable URI versioning — it would duplicate /v1.
   app.setGlobalPrefix(prefix);
-  app.use(helmet());
+  app.use(
+    helmet({
+      // HSTS lo gestiona Cloudflare en el edge; evita conflicto doble en API.
+      hsts: nodeEnv !== 'production',
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+    }),
+  );
   app.use(compression());
+
+  // Origen no debe cachear JSON de API (Cloudflare debe hacer bypass en reglas).
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const requestId = (req.headers['x-request-id'] as string | undefined) ?? randomUUID();
+    res.setHeader('x-request-id', requestId);
+    (req as Request & { requestId?: string }).requestId = requestId;
+
+    if (req.path.startsWith(`/${prefix}`)) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+      res.setHeader('Pragma', 'no-cache');
+    }
+
+    const critical =
+      req.path.startsWith(`/${prefix}/auth`) ||
+      req.path.startsWith(`/${prefix}/qr`) ||
+      req.path.startsWith(`/${prefix}/promotions`) ||
+      req.path.startsWith(`/${prefix}/admin/promotions`);
+    if (critical) {
+      logger.log(
+        JSON.stringify({
+          event: 'request_received',
+          requestId,
+          endpoint: req.path,
+          method: req.method,
+        }),
+      );
+    }
+    next();
+  });
 
   app.enableCors(buildCorsOptions(nodeEnv, corsOriginsRaw || '*'));
 

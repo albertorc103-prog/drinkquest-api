@@ -1,4 +1,4 @@
-import { Logger, UseGuards } from '@nestjs/common';
+import { ForbiddenException, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import {
@@ -11,14 +11,14 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { ChatService } from '../modules/chat/chat.service';
-import { FriendsService } from '../modules/friends/friends.service';
+import { RealtimeHub } from '../common/realtime/realtime-hub.service';
 import { RedisService } from '../common/redis/redis.service';
+import { ChatService } from '../modules/chat/chat.service';
 import { UsersService } from '../modules/users/users.service';
 
 /** CORS de Socket.IO se configura en ConfigurableIoAdapter (main.ts) desde CORS_ORIGINS. */
 @WebSocketGateway({ namespace: '/chat' })
-export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, OnModuleInit {
   @WebSocketServer()
   server!: Server;
 
@@ -28,10 +28,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     private readonly chat: ChatService,
-    private readonly friends: FriendsService,
     private readonly users: UsersService,
     private readonly redis: RedisService,
+    private readonly realtime: RealtimeHub,
   ) {}
+
+  onModuleInit() {
+    this.realtime.setServer(this.server);
+  }
 
   async handleConnection(client: Socket) {
     try {
@@ -45,7 +49,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       await this.users.setOnline(payload.sub, true);
       await this.redis.client.sadd(`online:${payload.sub}`, client.id);
       client.join(`user:${payload.sub}`);
+      const roomIds = await this.chat.listRoomIdsForUser(payload.sub);
+      for (const roomId of roomIds) {
+        client.join(`room:${roomId}`);
+      }
       this.server.emit('presence', { userId: payload.sub, online: true });
+
+      const summary = await this.chat.getSummary(payload.sub);
+      client.emit('messenger_summary', summary);
     } catch {
       client.disconnect();
     }
@@ -64,6 +75,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @SubscribeMessage('join_room')
   async joinRoom(@ConnectedSocket() client: Socket, @MessageBody() body: { roomId: string }) {
+    const userId = client.data.userId as string;
+    try {
+      await this.chat.assertParticipant(body.roomId, userId);
+    } catch {
+      throw new ForbiddenException('No perteneces a esta sala');
+    }
     client.join(`room:${body.roomId}`);
     return { ok: true };
   }
@@ -87,7 +104,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {
     const userId = client.data.userId as string;
     const message = await this.chat.sendMessage(body.roomId, userId, body.text, body.imageUrl);
-    this.server.to(`room:${body.roomId}`).emit('message', message);
     return message;
   }
 
@@ -97,7 +113,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() body: { messageId: string; roomId: string },
   ) {
     const userId = client.data.userId as string;
-    await this.chat.markRead(body.messageId, userId);
-    client.to(`room:${body.roomId}`).emit('read', { messageId: body.messageId, userId });
+    await this.chat.markRead(body.messageId, userId, body.roomId);
+    return { ok: true };
+  }
+
+  @SubscribeMessage('read_room')
+  async readRoom(@ConnectedSocket() client: Socket, @MessageBody() body: { roomId: string }) {
+    const userId = client.data.userId as string;
+    return this.chat.markRoomRead(body.roomId, userId);
   }
 }

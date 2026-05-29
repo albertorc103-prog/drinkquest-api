@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Patch, Post, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -7,6 +7,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { PrismaService } from '../../database/prisma.service';
+import { BarAccessStateService } from '../subscriptions/bar-access-state.service';
 import { BarsService } from './bars.service';
 
 @ApiTags('bars')
@@ -18,11 +19,20 @@ export class BarsController {
   constructor(
     private readonly bars: BarsService,
     private readonly prisma: PrismaService,
+    private readonly accessStateService: BarAccessStateService,
   ) {}
 
   @Get('me')
   me(@CurrentUser() user: JwtPayload) {
     return this.bars.getByOwner(user.sub);
+  }
+
+  @Get('me/access')
+  @ApiOperation({
+    summary: 'Estado SaaS autoritativo del local (suscripción + flags de acceso)',
+  })
+  accessState(@CurrentUser() user: JwtPayload) {
+    return this.accessStateService.getStateForOwner(user.sub);
   }
 
   @Get('dashboard')
