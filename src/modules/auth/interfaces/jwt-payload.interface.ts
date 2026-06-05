@@ -1,4 +1,6 @@
 import { Role, SubscriptionPlan, SubscriptionStatus } from '@prisma/client';
+import { AccountType } from '../permissions/account-type.enum';
+import { AuthPermission } from '../permissions/auth-permission.enum';
 
 /** Claims SaaS opcionales en JWT (solo cuentas BAR). */
 export interface BarJwtClaims {
@@ -13,6 +15,10 @@ export interface JwtPayload extends BarJwtClaims {
   sub: string;
   email: string;
   role: Role;
+  /** Opcional en tokens legacy; JwtStrategy los rehidrata desde role. */
+  permissions?: AuthPermission[];
+  accountType?: AccountType;
+  isAdmin?: boolean;
 }
 
 export interface TokenPair {

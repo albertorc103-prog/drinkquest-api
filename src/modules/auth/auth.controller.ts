@@ -1,9 +1,12 @@
-import { Body, Controller, HttpCode, HttpStatus, Post, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, HttpCode, HttpStatus, Post, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { AuthService } from './auth.service';
+import { AuthMeResponseDto } from './dto/auth-me-response.dto';
+import { AuthSessionResponseDto } from './dto/auth-session-response.dto';
+import { JwtPayload } from './interfaces/jwt-payload.interface';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
@@ -20,21 +23,33 @@ export class AuthController {
   @HttpCode(HttpStatus.CREATED)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiOperation({ summary: 'Registro email/password' })
-  register(@Body() dto: RegisterDto) {
+  @ApiOkResponse({ type: AuthSessionResponseDto })
+  register(@Body() dto: RegisterDto): Promise<AuthSessionResponseDto> {
     return this.auth.register(dto);
   }
 
   @Post('login')
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiOperation({ summary: 'Login' })
-  login(@Body() dto: LoginDto) {
+  @ApiOkResponse({ type: AuthSessionResponseDto })
+  login(@Body() dto: LoginDto): Promise<AuthSessionResponseDto> {
     return this.auth.login(dto.email, dto.password, dto.intent);
   }
 
   @Post('refresh')
   @ApiOperation({ summary: 'Renovar access token' })
-  refresh(@Body() dto: RefreshTokenDto) {
+  @ApiOkResponse({ type: AuthSessionResponseDto })
+  refresh(@Body() dto: RefreshTokenDto): Promise<AuthSessionResponseDto> {
     return this.auth.refresh(dto.refreshToken);
+  }
+
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Usuario autenticado actual (sesión + perfil)' })
+  @ApiOkResponse({ type: AuthMeResponseDto })
+  me(@CurrentUser() user: JwtPayload): Promise<AuthMeResponseDto> {
+    return this.auth.getMe(user);
   }
 
   @Post('forgot-password')

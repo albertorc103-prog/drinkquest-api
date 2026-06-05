@@ -16,7 +16,13 @@ import { JwtBarClaimsService } from '../subscriptions/jwt-bar-claims.service';
 import { RegisterDto } from './dto/register.dto';
 import { validateLoginIntent } from './auth-login-intent.util';
 import { AuthLoginIntent } from './enums/auth-login-intent.enum';
-import { JwtPayload, TokenPair } from './interfaces/jwt-payload.interface';
+import { AuthMeResponseDto } from './dto/auth-me-response.dto';
+import { toAuthProfileDto } from './mappers/auth-profile.mapper';
+import { AuthSessionResponseDto } from './dto/auth-session-response.dto';
+import { toAuthUserSummary } from './mappers/auth-user.mapper';
+import { enrichJwtAuthClaims } from './permissions/auth-context.util';
+import { JwtPayload } from './interfaces/jwt-payload.interface';
+import { UsersService } from '../users/users.service';
 
 @Injectable()
 export class AuthService {
@@ -29,9 +35,10 @@ export class AuthService {
     private readonly mail: MailService,
     private readonly subscriptions: BarSubscriptionService,
     private readonly jwtBarClaims: JwtBarClaimsService,
+    private readonly users: UsersService,
   ) {}
 
-  async register(dto: RegisterDto) {
+  async register(dto: RegisterDto): Promise<AuthSessionResponseDto> {
     const email = dto.email.trim().toLowerCase();
     const exists = await this.prisma.user.findUnique({ where: { email } });
     if (exists) throw new ConflictException('El email ya está registrado');
@@ -79,7 +86,7 @@ export class AuthService {
     return this.issueTokensForUser(user.id, user.email, user.role);
   }
 
-  async login(email: string, password: string, intent: AuthLoginIntent): Promise<TokenPair> {
+  async login(email: string, password: string, intent: AuthLoginIntent): Promise<AuthSessionResponseDto> {
     const user = await this.prisma.user.findFirst({
       where: { email: email.trim().toLowerCase(), deletedAt: null },
     });
@@ -113,7 +120,7 @@ export class AuthService {
     validateLoginIntent(role, intent, bar != null);
   }
 
-  async refresh(refreshToken: string): Promise<TokenPair> {
+  async refresh(refreshToken: string): Promise<AuthSessionResponseDto> {
     const tokenHash = sha256(refreshToken);
     const stored = await this.prisma.refreshToken.findFirst({
       where: { tokenHash, revokedAt: null, expiresAt: { gt: new Date() } },
@@ -214,16 +221,65 @@ export class AuthService {
     await this.mail.sendEmailVerification(email, token);
   }
 
+  async getMe(jwtUser: JwtPayload): Promise<AuthMeResponseDto> {
+    const profileRow = await this.users.getProfile(jwtUser.sub, jwtUser.sub);
+    const claims = enrichJwtAuthClaims(jwtUser.role, {
+      permissions: jwtUser.permissions,
+      accountType: jwtUser.accountType,
+      isAdmin: jwtUser.isAdmin,
+    });
+
+    return {
+      id: jwtUser.sub,
+      email: jwtUser.email,
+      role: jwtUser.role,
+      permissions: claims.permissions,
+      isAdmin: claims.isAdmin,
+      accountType: claims.accountType,
+      profile: toAuthProfileDto(profileRow),
+      barId: jwtUser.barId,
+    };
+  }
+
   private async issueTokensForUser(
     userId: string,
     email: string,
     role: Role,
-  ): Promise<TokenPair> {
-    const barClaims = await this.jwtBarClaims.buildForUser(userId, role);
-    return this.issueTokens({ sub: userId, email, role, ...barClaims });
+  ): Promise<AuthSessionResponseDto> {
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, deletedAt: null },
+      select: { id: true, email: true, role: true },
+    });
+    if (!user) {
+      throw new UnauthorizedException('Usuario no encontrado');
+    }
+    const payload = await this.buildJwtPayload(userId, email, role);
+    const tokens = await this.issueTokens(payload);
+    return {
+      ...tokens,
+      user: toAuthUserSummary(user),
+    };
   }
 
-  private async issueTokens(payload: JwtPayload): Promise<TokenPair> {
+  private async buildJwtPayload(userId: string, email: string, role: Role): Promise<JwtPayload> {
+    const barClaims = await this.jwtBarClaims.buildForUser(userId, role);
+    const authClaims = enrichJwtAuthClaims(role);
+    return {
+      sub: userId,
+      email,
+      role,
+      ...barClaims,
+      permissions: authClaims.permissions,
+      accountType: authClaims.accountType,
+      isAdmin: authClaims.isAdmin,
+    };
+  }
+
+  private async issueTokens(payload: JwtPayload): Promise<{
+    accessToken: string;
+    refreshToken: string;
+    expiresIn: string;
+  }> {
     const accessSecret = this.config.get<string>('auth.accessSecret')!;
     const refreshSecret = this.config.get<string>('auth.refreshSecret')!;
     const accessExpires = this.config.get<string>('auth.accessExpires', '15m');

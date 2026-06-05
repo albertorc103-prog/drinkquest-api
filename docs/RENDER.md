@@ -65,7 +65,9 @@ MAIL_ENABLED=false
 
 # Opcional: admin creado automáticamente en cada deploy (seed idempotente)
 SEED_ADMIN_EMAIL=admin@drinkquest.app
-SEED_ADMIN_PASSWORD=<cambia-esto-en-produccion>
+SEED_ADMIN_PASSWORD=<tu-contraseña-segura>
+# Solo para UN deploy: fuerza actualizar la contraseña del admin si ya existía
+# SEED_ADMIN_RESET_PASSWORD=true
 ```
 
 **Notas:**
@@ -96,15 +98,59 @@ Respuesta esperada: `{"status":"ok","timestamp":"..."}`
 
 Swagger: `https://TU-SERVICIO.onrender.com/docs`
 
-## 6. App Android
+## 6. App Android (opción Render / producción)
 
-En `local.properties` del proyecto raíz:
+En `local.properties` del proyecto raíz (ya configurado si usas `drinkquest-api.onrender.com`):
 
 ```properties
-API_BASE_URL=https://TU-SERVICIO.onrender.com/api/v1
+API_BASE_URL_DEV=https\://drinkquest-api.onrender.com/api/v1
+API_BASE_URL_PROD=https\://drinkquest-api.onrender.com/api/v1
 ```
 
-Quita `API_LAN_HOST` o déjalo vacío. Recompila la app.
+Recompila la app (**Build → Rebuild Project**). En login elige **Admin** e inicia con `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD`.
+
+### Restablecer contraseña del admin en Render
+
+Si ves **«Credenciales incorrectas»** con `ChangeMeAdmin123!`, la API de producción tiene **otra** contraseña (el seed no la cambia en deploys normales).
+
+1. Render Dashboard → servicio **drinkquest-api** → **Environment**.
+2. Define o actualiza:
+   - `SEED_ADMIN_EMAIL` = `admin@drinkquest.app`
+   - `SEED_ADMIN_PASSWORD` = la contraseña que quieras usar en la app (ej. una segura que recuerdes)
+   - `SEED_ADMIN_RESET_PASSWORD` = `true` (**solo para el próximo deploy**)
+3. **Manual Deploy** (o push a la rama conectada).
+4. Cuando el deploy termine, **borra** `SEED_ADMIN_RESET_PASSWORD` del entorno y vuelve a desplegar (evita resetear la clave en cada arranque).
+5. En la app: chip **Admin**, mismo correo y la contraseña del paso 2.
+
+Verifica el login con Swagger o curl:
+
+```bash
+curl -X POST https://drinkquest-api.onrender.com/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d "{\"email\":\"admin@drinkquest.app\",\"password\":\"TU_PASSWORD\",\"intent\":\"USER\"}"
+```
+
+Debe devolver `accessToken`, no `401`.
+
+La respuesta debe incluir `user.role` = `SUPER_ADMIN` y `user.isAdmin` = `true`. Si `role` es `USER`, el seed no ha corrido o la cuenta no es la de admin.
+
+### App Android: «no tiene acceso al panel administrativo»
+
+La app exige `UserRole.ADMIN` tras login (modo Admin). Eso se deriva de:
+
+- `user.isAdmin === true` en la respuesta de login, o
+- `user.role` ∈ `ADMIN`, `SUPER_ADMIN`
+
+Tras desplegar backend + recompilar la app, inicia sesión con chip **Admin**.
+
+| Variable Render | Mantener |
+|-----------------|----------|
+| `SEED_ADMIN_EMAIL` | `admin@drinkquest.app` |
+| `SEED_ADMIN_PASSWORD` | Tu contraseña (ej. `ChangeMeAdmin123!`) |
+| `SEED_ADMIN_RESET_PASSWORD` | Solo `true` un deploy si cambias contraseña; luego quitar |
+| `SKIP_DB_SEED` | No definir (o `0`) para que el seed corra |
+
+**Desplegar:** carpeta `backend/` (Web Service). **App:** recompilar APK con el fix de `ApiAuthRepository` (mapeo `SUPER_ADMIN`).
 
 ## 7. Blueprint (opcional)
 

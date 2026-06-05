@@ -1,11 +1,12 @@
 import { Body, Controller, Param, Patch, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { Role } from '@prisma/client';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { ApiAuthForbiddenResponses } from '../../common/decorators/api-auth-forbidden.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
-import { RolesGuard } from '../../common/guards/roles.guard';
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
+import { AuthPermission } from '../auth/permissions/auth-permission.enum';
 import { AdminSubscriptionsService } from '../subscriptions/admin-subscriptions.service';
 import { AdminActivateSubscriptionDto } from '../subscriptions/dto/admin-activate-subscription.dto';
 import { AdminExtendTrialDto } from '../subscriptions/dto/admin-extend-trial.dto';
@@ -13,8 +14,9 @@ import { AdminSubscriptionActionDto } from '../subscriptions/dto/admin-subscript
 
 @ApiTags('admin-subscriptions')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.ADMIN, Role.SUPER_ADMIN)
+@ApiAuthForbiddenResponses()
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+@RequirePermissions(AuthPermission.MANAGE_SUBSCRIPTIONS)
 @Controller('admin/bars')
 export class AdminSubscriptionsController {
   constructor(private readonly adminSubscriptions: AdminSubscriptionsService) {}

@@ -4,8 +4,10 @@ import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
+import { UsersModule } from '../users/users.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { PermissionsGuard } from './guards/permissions.guard';
 import { JwtStrategy } from './strategies/jwt.strategy';
 
 @Module({
@@ -23,9 +25,10 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     }),
     NotificationsModule,
     SubscriptionsModule,
+    UsersModule,
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy],
-  exports: [AuthService, JwtModule],
+  providers: [AuthService, JwtStrategy, PermissionsGuard],
+  exports: [AuthService, JwtModule, PermissionsGuard],
 })
 export class AuthModule {}

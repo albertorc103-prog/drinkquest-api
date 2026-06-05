@@ -115,11 +115,22 @@ async function seedMissionsAndAchievements(): Promise<void> {
   }
 }
 
+/**
+ * Usuario administrador de plataforma.
+ * - Rol SUPER_ADMIN → permisos `*` (todos) vía enrichJwtAuthClaims en auth.
+ * - La app Android mapea SUPER_ADMIN / ADMIN + isAdmin al panel administrativo.
+ */
 async function seedAdminUser(): Promise<string> {
   const adminEmail = process.env.SEED_ADMIN_EMAIL ?? 'admin@drinkquest.app';
   const adminPass = process.env.SEED_ADMIN_PASSWORD ?? 'ChangeMeAdmin123!';
+  const resetPassword = process.env.SEED_ADMIN_RESET_PASSWORD === 'true';
   const passwordHash = await hashPassword(adminPass);
   const existing = await prisma.user.findUnique({ where: { email: adminEmail } });
+  if (existing && existing.role === Role.USER) {
+    console.warn(
+      `⚠️  ${adminEmail} tenía rol USER; se actualizará a SUPER_ADMIN en este seed.`,
+    );
+  }
   await prisma.user.upsert({
     where: { email: adminEmail },
     create: {
@@ -130,15 +141,16 @@ async function seedAdminUser(): Promise<string> {
       emailVerified: true,
       emailVerifiedAt: new Date(),
     },
-    // Idempotente: no sobrescribe passwordHash si el admin ya existe (evita resets en cada deploy).
+    // Siempre fija rol admin (corrige cuentas USER/BAR creadas por error).
     update: {
       role: Role.SUPER_ADMIN,
       displayName: 'DrinkQuest Admin',
       emailVerified: true,
       emailVerifiedAt: existing?.emailVerifiedAt ?? new Date(),
+      ...(resetPassword ? { passwordHash } : {}),
     },
   });
-  console.log(`✅ Admin listo: ${adminEmail} (${existing ? 'actualizado' : 'creado'})`);
+  console.log(`✅ Admin listo: ${adminEmail} rol=SUPER_ADMIN (${existing ? 'actualizado' : 'creado'})`);
   return adminEmail;
 }
 
