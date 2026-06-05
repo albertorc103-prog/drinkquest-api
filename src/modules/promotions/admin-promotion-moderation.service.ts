@@ -122,10 +122,7 @@ export class AdminPromotionModerationService {
 
     // El feed de clientes exige status ACTIVE + approval APPROVED (promotion-feed.service).
     const publishNow = promo.startsAt <= now && promo.endsAt > now;
-    const nextStatus =
-      publishNow && promo.status !== PromotionStatus.EXPIRED
-        ? PromotionStatus.ACTIVE
-        : promo.status;
+    const nextStatus = publishNow ? PromotionStatus.ACTIVE : promo.status;
 
     const updated = await this.prisma.barPromotion.update({
       where: { id: promo.id },
