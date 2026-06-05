@@ -14,6 +14,90 @@ export class AdminPromotionModerationService {
 
   constructor(private readonly prisma: PrismaService) {}
 
+  async inspectFeedEligibility(promotionId: string) {
+    const now = new Date();
+    const promo = await this.prisma.barPromotion.findUnique({
+      where: { id: promotionId },
+      include: {
+        bar: {
+          select: {
+            id: true,
+            businessName: true,
+            isActive: true,
+            deletedAt: true,
+            subscription: {
+              select: {
+                status: true,
+                promoEnabled: true,
+                trialEndsAt: true,
+                currentPeriodEnd: true,
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!promo) throw new NotFoundException('Promoción no encontrada.');
+
+    const sub = promo.bar.subscription;
+    const subscriptionActive =
+      !!sub &&
+      sub.promoEnabled &&
+      ((sub.status === 'TRIAL' &&
+        (sub.trialEndsAt == null || sub.trialEndsAt >= now)) ||
+        (sub.status === 'ACTIVE' &&
+          (sub.currentPeriodEnd == null || sub.currentPeriodEnd >= now)));
+
+    const checks = {
+      statusIsActive: promo.status === PromotionStatus.ACTIVE,
+      approvalIsApproved: promo.approvalStatus === PromotionApprovalStatus.APPROVED,
+      startsAtLteNow: promo.startsAt <= now,
+      endsAtGtNow: promo.endsAt > now,
+      barActive: promo.bar.deletedAt == null && promo.bar.isActive,
+      subscriptionPromoEnabled: subscriptionActive,
+    };
+
+    return {
+      id: promo.id,
+      approvalStatus: promo.approvalStatus,
+      status: promo.status,
+      startsAt: promo.startsAt,
+      endsAt: promo.endsAt,
+      barId: promo.barId,
+      barName: promo.bar.businessName,
+      now,
+      subscription: sub,
+      checks,
+      passesFeedFilter: Object.values(checks).every(Boolean),
+    };
+  }
+
+  async listRecentForFeedDebug(limit = 15) {
+    const rows = await this.prisma.barPromotion.findMany({
+      take: Math.min(Math.max(limit, 1), 50),
+      orderBy: { updatedAt: 'desc' },
+      include: {
+        bar: {
+          select: {
+            id: true,
+            businessName: true,
+            isActive: true,
+            deletedAt: true,
+            subscription: {
+              select: {
+                status: true,
+                promoEnabled: true,
+                trialEndsAt: true,
+                currentPeriodEnd: true,
+              },
+            },
+          },
+        },
+      },
+    });
+    return Promise.all(rows.map((row) => this.inspectFeedEligibility(row.id)));
+  }
+
   async listPending(limit = 100): Promise<PromotionResponseDto[]> {
     const rows = await this.prisma.barPromotion.findMany({
       where: { approvalStatus: PromotionApprovalStatus.PENDING_REVIEW },
@@ -31,9 +115,17 @@ export class AdminPromotionModerationService {
     if (promo.approvalStatus === PromotionApprovalStatus.APPROVED) {
       throw new BadRequestException('La promoción ya fue aprobada.');
     }
-    if (promo.status === PromotionStatus.EXPIRED || promo.endsAt <= new Date()) {
+    const now = new Date();
+    if (promo.status === PromotionStatus.EXPIRED || promo.endsAt <= now) {
       throw new BadRequestException('No se puede aprobar una promoción expirada.');
     }
+
+    // El feed de clientes exige status ACTIVE + approval APPROVED (promotion-feed.service).
+    const publishNow = promo.startsAt <= now && promo.endsAt > now;
+    const nextStatus =
+      publishNow && promo.status !== PromotionStatus.EXPIRED
+        ? PromotionStatus.ACTIVE
+        : promo.status;
 
     const updated = await this.prisma.barPromotion.update({
       where: { id: promo.id },
@@ -41,13 +133,17 @@ export class AdminPromotionModerationService {
         approvalStatus: PromotionApprovalStatus.APPROVED,
         rejectionReason: null,
         moderatedByAdminId: adminId,
-        moderatedAt: new Date(),
+        moderatedAt: now,
+        status: nextStatus,
       },
       include: {
         bar: { select: { id: true, businessName: true, slug: true, logoUrl: true, city: true } },
       },
     });
     await this.createEvent(promo.id, promo.barId, PromotionEventType.APPROVAL, adminId);
+    if (nextStatus === PromotionStatus.ACTIVE && promo.status !== PromotionStatus.ACTIVE) {
+      await this.createEvent(promo.id, promo.barId, PromotionEventType.ACTIVATION, adminId);
+    }
     this.logger.log(
       JSON.stringify({
         event: 'promotion_approve',
