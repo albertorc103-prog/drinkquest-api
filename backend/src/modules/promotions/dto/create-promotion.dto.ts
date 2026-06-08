@@ -1,0 +1,41 @@
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { PromotionPlacementType } from '@prisma/client';
+import { IsDateString, IsEnum, IsInt, IsOptional, IsString, IsUrl, Max, MaxLength, Min } from 'class-validator';
+
+export class CreatePromotionDto {
+  @ApiProperty({ example: 'Happy Hour 2x1' })
+  @IsString()
+  @MaxLength(120)
+  title!: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  description?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUrl()
+  imageUrl?: string;
+
+  @ApiProperty({ example: '2025-06-01T18:00:00.000Z' })
+  @IsDateString()
+  startsAt!: string;
+
+  @ApiProperty({ example: '2025-06-01T22:00:00.000Z' })
+  @IsDateString()
+  endsAt!: string;
+
+  @ApiPropertyOptional({ enum: PromotionPlacementType, default: PromotionPlacementType.STANDARD })
+  @IsOptional()
+  @IsEnum(PromotionPlacementType)
+  placementType?: PromotionPlacementType;
+
+  @ApiPropertyOptional({ default: 0 })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(1000)
+  priority?: number;
+}

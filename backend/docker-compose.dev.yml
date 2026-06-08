@@ -1,0 +1,36 @@
+# Development override for Windows hosts — Linux node_modules in a named volume.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#
+# Source code: bind mount (.:/app)
+# node_modules: NEVER from Windows — only volume node_modules_linux
+
+services:
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    volumes:
+      - .:/app
+      - node_modules_linux:/app/node_modules
+    entrypoint: ["/app/scripts/docker-migrate.sh"]
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    environment:
+      NODE_ENV: development
+      SKIP_MIGRATE: "1"
+      CHOKIDAR_USEPOLLING: "true"
+      WATCHPACK_POLLING: "true"
+    volumes:
+      - .:/app
+      - node_modules_linux:/app/node_modules
+      - ./logs:/app/logs
+    entrypoint: ["/app/scripts/docker-entrypoint.dev.sh"]
+
+volumes:
+  node_modules_linux:
+    name: drinkquest_node_modules_linux

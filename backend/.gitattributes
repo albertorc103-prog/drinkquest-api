@@ -1,0 +1,3 @@
+# Prisma migrations: UTF-8 without BOM, LF (avoids P3018 on PostgreSQL / Docker)
+prisma/migrations/**/migration.sql text eol=lf working-tree-encoding=UTF-8
+prisma/migrations/**/migration.sql linguist-generated=false
