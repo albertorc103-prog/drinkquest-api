@@ -46,32 +46,53 @@ export class PromotionService {
     const placementType = dto.placementType ?? PromotionPlacementType.STANDARD;
     const priority = dto.priority ?? 0;
 
-    const created = await this.prisma.barPromotion.create({
-      data: {
+    const insertData = {
+      barId: bar.id,
+      title: dto.title.trim(),
+      description: dto.description?.trim(),
+      imageUrl: dto.imageUrl,
+      startsAt,
+      endsAt,
+      status: PromotionStatus.DRAFT,
+      placementType,
+      priority,
+      approvalStatus: PromotionApprovalStatus.PENDING_REVIEW,
+      rankingScore: computePromotionRankingScore(priority, placementType),
+    };
+
+    this.logger.log(
+      JSON.stringify({
+        event: 'promotion_create_db_insert',
+        ownerUserId,
         barId: bar.id,
-        title: dto.title.trim(),
-        description: dto.description?.trim(),
-        imageUrl: dto.imageUrl,
-        startsAt,
-        endsAt,
-        status: PromotionStatus.DRAFT,
-        placementType,
-        priority,
-        approvalStatus: PromotionApprovalStatus.PENDING_REVIEW,
-        rankingScore: computePromotionRankingScore(priority, placementType),
-      },
-    });
+        data: {
+          ...insertData,
+          startsAt: startsAt.toISOString(),
+          endsAt: endsAt.toISOString(),
+        },
+      }),
+    );
+
+    const created = await this.prisma.barPromotion.create({ data: insertData });
+
     await this.createEvent(created.id, created.barId, PromotionEventType.RESUBMISSION, ownerUserId, {
       source: 'create',
     });
+
     this.logger.log(
       JSON.stringify({
-        event: 'promotion_create',
+        event: 'promotion_create_saved',
         ownerUserId,
         promotionId: created.id,
         barId: created.barId,
+        status: created.status,
+        approvalStatus: created.approvalStatus,
+        imageUrl: created.imageUrl,
+        startsAt: created.startsAt.toISOString(),
+        endsAt: created.endsAt.toISOString(),
       }),
     );
+
     return mapPromotion(created);
   }
 

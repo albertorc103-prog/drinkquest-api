@@ -1,6 +1,16 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { PromotionPlacementType } from '@prisma/client';
-import { IsDateString, IsEnum, IsInt, IsOptional, IsString, IsUrl, Max, MaxLength, Min } from 'class-validator';
+import {
+  IsDateString,
+  IsEnum,
+  IsInt,
+  IsOptional,
+  IsString,
+  Matches,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
 
 export class UpdatePromotionDto {
   @ApiPropertyOptional()
@@ -17,7 +27,9 @@ export class UpdatePromotionDto {
 
   @ApiPropertyOptional()
   @IsOptional()
-  @IsUrl()
+  @IsString()
+  @MaxLength(2048)
+  @Matches(/^https?:\/\/.+/i, { message: 'imageUrl debe ser una URL http(s) válida' })
   imageUrl?: string;
 
   @ApiPropertyOptional()

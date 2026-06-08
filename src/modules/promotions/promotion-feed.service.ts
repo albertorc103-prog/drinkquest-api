@@ -1,14 +1,16 @@
-import { Injectable } from '@nestjs/common';
-import { Prisma, PromotionApprovalStatus, PromotionStatus } from '@prisma/client';
+import { Injectable, Logger } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { PromotionFeedPageDto } from './dto/promotion-response.dto';
 import { mapPromotion } from './mappers/promotion.mapper';
-import { activePromoSubscriptionWhere } from './utils/promotion-feed-subscription.where';
+import { buildClientPromotionFeedWhere } from './utils/promotion-client-feed.util';
 
 export type PromotionFeedSort = 'ranking' | 'ending_soon' | 'newest';
 
 @Injectable()
 export class PromotionFeedService {
+  private readonly logger = new Logger(PromotionFeedService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   async listForUsers(
@@ -19,19 +21,7 @@ export class PromotionFeedService {
     const now = new Date();
     const safeLimit = Math.min(Math.max(limit, 1), 50);
     const skip = (Math.max(page, 1) - 1) * safeLimit;
-
-    const where: Prisma.BarPromotionWhereInput = {
-      status: PromotionStatus.ACTIVE,
-      approvalStatus: PromotionApprovalStatus.APPROVED,
-      startsAt: { lte: now },
-      endsAt: { gt: now },
-      bar: {
-        deletedAt: null,
-        isActive: true,
-        subscription: activePromoSubscriptionWhere(now),
-      },
-    };
-
+    const where = buildClientPromotionFeedWhere(now);
     const orderBy = this.resolveOrderBy(sort);
 
     const [rows, total] = await Promise.all([
@@ -48,6 +38,16 @@ export class PromotionFeedService {
       }),
       this.prisma.barPromotion.count({ where }),
     ]);
+
+    this.logger.debug(
+      JSON.stringify({
+        event: 'promotion_feed_list',
+        page: Math.max(page, 1),
+        limit: safeLimit,
+        total,
+        returned: rows.length,
+      }),
+    );
 
     return {
       items: rows.map((row) => mapPromotion(row)),

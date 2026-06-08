@@ -7,6 +7,13 @@ import {
 import { PrismaService } from '../../database/prisma.service';
 import { PromotionResponseDto } from './dto/promotion-response.dto';
 import { mapPromotion } from './mappers/promotion.mapper';
+import {
+  assertApprovablePromotion,
+  buildClientPromotionFeedWhere,
+  computeApprovalPublishPatch,
+  evaluateFeedEligibility,
+  isSubscriptionActiveForPromoFeed,
+} from './utils/promotion-client-feed.util';
 
 @Injectable()
 export class AdminPromotionModerationService {
@@ -16,46 +23,12 @@ export class AdminPromotionModerationService {
 
   async inspectFeedEligibility(promotionId: string) {
     const now = new Date();
-    const promo = await this.prisma.barPromotion.findUnique({
-      where: { id: promotionId },
-      include: {
-        bar: {
-          select: {
-            id: true,
-            businessName: true,
-            isActive: true,
-            deletedAt: true,
-            subscription: {
-              select: {
-                status: true,
-                promoEnabled: true,
-                trialEndsAt: true,
-                currentPeriodEnd: true,
-              },
-            },
-          },
-        },
-      },
-    });
-    if (!promo) throw new NotFoundException('Promoción no encontrada.');
-
-    const sub = promo.bar.subscription;
-    const subscriptionActive =
-      !!sub &&
-      sub.promoEnabled &&
-      ((sub.status === 'TRIAL' &&
-        (sub.trialEndsAt == null || sub.trialEndsAt >= now)) ||
-        (sub.status === 'ACTIVE' &&
-          (sub.currentPeriodEnd == null || sub.currentPeriodEnd >= now)));
-
-    const checks = {
-      statusIsActive: promo.status === PromotionStatus.ACTIVE,
-      approvalIsApproved: promo.approvalStatus === PromotionApprovalStatus.APPROVED,
-      startsAtLteNow: promo.startsAt <= now,
-      endsAtGtNow: promo.endsAt > now,
-      barActive: promo.bar.deletedAt == null && promo.bar.isActive,
-      subscriptionPromoEnabled: subscriptionActive,
-    };
+    const promo = await this.requirePromotionWithBar(promotionId);
+    const { checks, passesFeedFilter } = evaluateFeedEligibility(
+      promo,
+      promo.bar,
+      now,
+    );
 
     return {
       id: promo.id,
@@ -66,9 +39,9 @@ export class AdminPromotionModerationService {
       barId: promo.barId,
       barName: promo.bar.businessName,
       now,
-      subscription: sub,
+      subscription: promo.bar.subscription,
       checks,
-      passesFeedFilter: Object.values(checks).every(Boolean),
+      passesFeedFilter,
     };
   }
 
@@ -76,24 +49,7 @@ export class AdminPromotionModerationService {
     const rows = await this.prisma.barPromotion.findMany({
       take: Math.min(Math.max(limit, 1), 50),
       orderBy: { updatedAt: 'desc' },
-      include: {
-        bar: {
-          select: {
-            id: true,
-            businessName: true,
-            isActive: true,
-            deletedAt: true,
-            subscription: {
-              select: {
-                status: true,
-                promoEnabled: true,
-                trialEndsAt: true,
-                currentPeriodEnd: true,
-              },
-            },
-          },
-        },
-      },
+      select: { id: true },
     });
     return Promise.all(rows.map((row) => this.inspectFeedEligibility(row.id)));
   }
@@ -110,19 +66,70 @@ export class AdminPromotionModerationService {
     return rows.map((row) => mapPromotion(row));
   }
 
+  /**
+   * Corrige promociones ya aprobadas que no cumplen el filtro del feed (DRAFT/PAUSED o startsAt futuro).
+   */
+  async syncApprovedForClientFeed(): Promise<{
+    activatedCount: number;
+    startsAtAdjustedCount: number;
+    feedVisibleCount: number;
+  }> {
+    const now = new Date();
+
+    const activated = await this.prisma.barPromotion.updateMany({
+      where: {
+        approvalStatus: PromotionApprovalStatus.APPROVED,
+        endsAt: { gt: now },
+        status: { not: PromotionStatus.ACTIVE },
+      },
+      data: { status: PromotionStatus.ACTIVE },
+    });
+
+    const startsAdjusted = await this.prisma.barPromotion.updateMany({
+      where: {
+        approvalStatus: PromotionApprovalStatus.APPROVED,
+        endsAt: { gt: now },
+        startsAt: { gt: now },
+      },
+      data: { startsAt: now },
+    });
+
+    const feedVisibleCount = await this.prisma.barPromotion.count({
+      where: buildClientPromotionFeedWhere(now),
+    });
+
+    this.logger.log(
+      JSON.stringify({
+        event: 'promotion_sync_approved_feed',
+        activatedCount: activated.count,
+        startsAtAdjustedCount: startsAdjusted.count,
+        feedVisibleCount,
+      }),
+    );
+
+    return {
+      activatedCount: activated.count,
+      startsAtAdjustedCount: startsAdjusted.count,
+      feedVisibleCount,
+    };
+  }
+
   async approve(promotionId: string, adminId: string): Promise<PromotionResponseDto> {
-    const promo = await this.requirePromotion(promotionId);
+    const promo = await this.requirePromotionWithBar(promotionId);
     if (promo.approvalStatus === PromotionApprovalStatus.APPROVED) {
       throw new BadRequestException('La promoción ya fue aprobada.');
     }
+
     const now = new Date();
-    if (promo.status === PromotionStatus.EXPIRED || promo.endsAt <= now) {
-      throw new BadRequestException('No se puede aprobar una promoción expirada.');
+    assertApprovablePromotion(promo, now);
+
+    if (!isSubscriptionActiveForPromoFeed(promo.bar.subscription, now)) {
+      throw new BadRequestException(
+        'El local no tiene suscripción activa con promociones habilitadas. Activa el plan del bar antes de aprobar.',
+      );
     }
 
-    // El feed de clientes exige status ACTIVE + approval APPROVED (promotion-feed.service).
-    const publishNow = promo.startsAt <= now && promo.endsAt > now;
-    const nextStatus = publishNow ? PromotionStatus.ACTIVE : promo.status;
+    const publish = computeApprovalPublishPatch(promo, now);
 
     const updated = await this.prisma.barPromotion.update({
       where: { id: promo.id },
@@ -131,24 +138,32 @@ export class AdminPromotionModerationService {
         rejectionReason: null,
         moderatedByAdminId: adminId,
         moderatedAt: now,
-        status: nextStatus,
+        status: publish.status,
+        ...(publish.startsAt ? { startsAt: publish.startsAt } : {}),
       },
       include: {
         bar: { select: { id: true, businessName: true, slug: true, logoUrl: true, city: true } },
       },
     });
+
     await this.createEvent(promo.id, promo.barId, PromotionEventType.APPROVAL, adminId);
-    if (nextStatus === PromotionStatus.ACTIVE && promo.status !== PromotionStatus.ACTIVE) {
+    if (publish.activated) {
       await this.createEvent(promo.id, promo.barId, PromotionEventType.ACTIVATION, adminId);
     }
+
+    const { passesFeedFilter } = evaluateFeedEligibility(updated, promo.bar, now);
     this.logger.log(
       JSON.stringify({
         event: 'promotion_approve',
         promotionId: promo.id,
         barId: promo.barId,
         adminId,
+        activated: publish.activated,
+        startsAtAdjusted: publish.startsAtAdjusted,
+        passesFeedFilter,
       }),
     );
+
     return mapPromotion(updated);
   }
 
@@ -212,6 +227,32 @@ export class AdminPromotionModerationService {
     return promo;
   }
 
+  private async requirePromotionWithBar(promotionId: string) {
+    const promo = await this.prisma.barPromotion.findUnique({
+      where: { id: promotionId },
+      include: {
+        bar: {
+          select: {
+            id: true,
+            businessName: true,
+            isActive: true,
+            deletedAt: true,
+            subscription: {
+              select: {
+                status: true,
+                promoEnabled: true,
+                trialEndsAt: true,
+                currentPeriodEnd: true,
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!promo) throw new NotFoundException('Promoción no encontrada.');
+    return promo;
+  }
+
   private async createEvent(
     promotionId: string,
     barId: string,
@@ -230,4 +271,3 @@ export class AdminPromotionModerationService {
     });
   }
 }
-

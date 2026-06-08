@@ -1,6 +1,16 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { PromotionPlacementType } from '@prisma/client';
-import { IsDateString, IsEnum, IsInt, IsOptional, IsString, IsUrl, Max, MaxLength, Min } from 'class-validator';
+import {
+  IsDateString,
+  IsEnum,
+  IsInt,
+  IsOptional,
+  IsString,
+  Matches,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
 
 export class CreatePromotionDto {
   @ApiProperty({ example: 'Happy Hour 2x1' })
@@ -14,9 +24,11 @@ export class CreatePromotionDto {
   @MaxLength(2000)
   description?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'URL pública devuelta por POST /uploads/direct (R2/CDN)' })
   @IsOptional()
-  @IsUrl()
+  @IsString()
+  @MaxLength(2048)
+  @Matches(/^https?:\/\/.+/i, { message: 'imageUrl debe ser una URL http(s) válida' })
   imageUrl?: string;
 
   @ApiProperty({ example: '2025-06-01T18:00:00.000Z' })

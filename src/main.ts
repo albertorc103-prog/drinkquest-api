@@ -56,6 +56,8 @@ async function bootstrap() {
       req.path.startsWith(`/${prefix}/auth`) ||
       req.path.startsWith(`/${prefix}/qr`) ||
       req.path.startsWith(`/${prefix}/promotions`) ||
+      req.path.startsWith(`/${prefix}/bars/promotions`) ||
+      req.path.startsWith(`/${prefix}/uploads`) ||
       req.path.startsWith(`/${prefix}/admin/promotions`);
     if (critical) {
       logger.log(

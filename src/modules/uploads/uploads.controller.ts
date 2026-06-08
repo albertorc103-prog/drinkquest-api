@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Logger,
   Post,
   UploadedFile,
   UseGuards,
@@ -29,6 +30,8 @@ function assertUploadFolder(folder: string): UploadFolder {
 @UseGuards(JwtAuthGuard)
 @Controller('uploads')
 export class UploadsController {
+  private readonly logger = new Logger(UploadsController.name);
+
   constructor(private readonly storage: StorageService) {}
 
   @Post('direct')
@@ -63,6 +66,17 @@ export class UploadsController {
     if (!/^image\/(jpeg|jpg|png|webp)$/i.test(contentType)) {
       throw new BadRequestException('Solo se permiten imágenes JPEG, PNG o WebP.');
     }
-    return this.storage.uploadObject(folder, file.buffer, contentType);
+    const result = await this.storage.uploadObject(folder, file.buffer, contentType);
+    this.logger.log(
+      JSON.stringify({
+        event: 'upload_direct_saved',
+        folder,
+        key: result.key,
+        publicUrl: result.publicUrl,
+        bytes: file.buffer.length,
+        contentType,
+      }),
+    );
+    return result;
   }
 }
