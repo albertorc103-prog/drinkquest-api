@@ -1,10 +1,20 @@
 import { Bar, BarPromotion } from '@prisma/client';
+import { buildPublicObjectUrl } from '../../uploads/utils/minio-url.util';
 import {
   PromotionAnalyticsSummaryDto,
   PromotionResponseDto,
 } from '../dto/promotion-response.dto';
 
 type PromotionWithBar = BarPromotion & { bar?: Pick<Bar, 'id' | 'businessName' | 'slug' | 'logoUrl' | 'city'> };
+
+/** Corrige URLs R2 guardadas con /drinkquest/ de más en el path público. */
+function normalizePromotionImageUrl(imageUrl: string | null): string | null {
+  if (!imageUrl) return null;
+  if (imageUrl.includes('.r2.dev') && imageUrl.includes('/drinkquest/')) {
+    return imageUrl.replace('/drinkquest/', '/');
+  }
+  return imageUrl;
+}
 
 export function mapPromotion(
   promo: PromotionWithBar,
@@ -15,7 +25,7 @@ export function mapPromotion(
     barId: promo.barId,
     title: promo.title,
     description: promo.description,
-    imageUrl: promo.imageUrl,
+    imageUrl: normalizePromotionImageUrl(promo.imageUrl),
     startsAt: promo.startsAt.toISOString(),
     endsAt: promo.endsAt.toISOString(),
     status: promo.status,

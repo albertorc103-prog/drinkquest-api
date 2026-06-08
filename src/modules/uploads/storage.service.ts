@@ -2,6 +2,7 @@ import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
+import { buildPublicObjectUrl } from './utils/minio-url.util';
 
 function buildS3Endpoint(useSsl: boolean, host: string, port: number): string {
   const protocol = useSsl ? 'https' : 'http';
@@ -15,6 +16,7 @@ export class StorageService {
   private readonly client: S3Client;
   private readonly bucket: string;
   private readonly publicUrl: string;
+  private readonly publicObjectBase: string;
   private readonly storageMisconfiguredForClients: boolean;
 
   constructor(config: ConfigService) {
@@ -24,6 +26,9 @@ export class StorageService {
     const region = config.get<string>('minio.region', 'auto');
     this.bucket = config.get<string>('minio.bucket', 'drinkquest');
     this.publicUrl = config.get<string>('minio.publicUrl', '').replace(/\/$/, '');
+    this.publicObjectBase =
+      config.get<string>('minio.publicObjectBase') ??
+      this.publicUrl;
     this.storageMisconfiguredForClients =
       config.get<boolean>('minio.storageMisconfiguredForClients') === true;
 
@@ -85,6 +90,8 @@ export class StorageService {
         { cause: err instanceof Error ? err : undefined },
       );
     }
-    return { key, publicUrl: `${this.publicUrl}/${key}` };
+    const publicObjectUrl = buildPublicObjectUrl(this.publicUrl, this.bucket, key);
+    return { key, publicUrl: publicObjectUrl };
   }
+
 }

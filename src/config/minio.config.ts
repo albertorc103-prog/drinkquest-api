@@ -1,5 +1,9 @@
 import { registerAs } from '@nestjs/config';
-import { isLocalhostHost, parseMinioPublicBase } from '../modules/uploads/utils/minio-url.util';
+import {
+  isLocalhostHost,
+  parseMinioPublicBase,
+  resolvePublicObjectBase,
+} from '../modules/uploads/utils/minio-url.util';
 
 export default registerAs('minio', () => {
   const publicUrl = process.env.MINIO_PUBLIC_URL ?? 'http://localhost:9000/drinkquest';
@@ -10,6 +14,8 @@ export default registerAs('minio', () => {
     process.env.MINIO_USE_SSL === 'true' ||
     (process.env.MINIO_USE_SSL !== 'false' && parsed.useSsl);
 
+  const bucket = process.env.MINIO_BUCKET ?? 'drinkquest';
+
   return {
     endpoint,
     port,
@@ -18,8 +24,9 @@ export default registerAs('minio', () => {
     region: process.env.MINIO_REGION ?? 'auto',
     accessKey: process.env.MINIO_ROOT_USER ?? 'minioadmin',
     secretKey: process.env.MINIO_ROOT_PASSWORD ?? 'minioadmin_secret',
-    bucket: process.env.MINIO_BUCKET ?? 'drinkquest',
+    bucket,
     publicUrl,
+    publicObjectBase: resolvePublicObjectBase(publicUrl, bucket),
     clientHostname: parsed.hostname,
     storageMisconfiguredForClients:
       process.env.NODE_ENV === 'production' && isLocalhostHost(parsed.hostname),
