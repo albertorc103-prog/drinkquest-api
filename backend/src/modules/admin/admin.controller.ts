@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Put, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ReportStatus, Role } from '@prisma/client';
 import { ApiAuthForbiddenResponses } from '../../common/decorators/api-auth-forbidden.decorator';
@@ -6,7 +6,9 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { AuthPermission } from '../auth/permissions/auth-permission.enum';
+import { AdminBarsMenuService } from './admin-bars-menu.service';
 import { AdminService } from './admin.service';
+import { AdminSetBarMenuDto } from './dto/admin-set-bar-menu.dto';
 
 @ApiTags('admin')
 @ApiBearerAuth()
@@ -14,7 +16,10 @@ import { AdminService } from './admin.service';
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('admin')
 export class AdminController {
-  constructor(private readonly admin: AdminService) {}
+  constructor(
+    private readonly admin: AdminService,
+    private readonly adminBarsMenu: AdminBarsMenuService,
+  ) {}
 
   @Get('analytics')
   @RequirePermissions(AuthPermission.VIEW_ANALYTICS)
@@ -35,6 +40,20 @@ export class AdminController {
   @ApiOperation({ summary: 'Listar locales (requiere manage_bars)' })
   bars() {
     return this.admin.listBars();
+  }
+
+  @Get('bars/:barId/menu')
+  @RequirePermissions(AuthPermission.MANAGE_BARS)
+  @ApiOperation({ summary: 'Catálogo completo con bebidas asignadas al local' })
+  getBarMenu(@Param('barId') barId: string) {
+    return this.adminBarsMenu.getBarMenu(barId);
+  }
+
+  @Put('bars/:barId/menu')
+  @RequirePermissions(AuthPermission.MANAGE_BARS)
+  @ApiOperation({ summary: 'Define qué bebidas ve el local y cuáles pueden generar QR' })
+  setBarMenu(@Param('barId') barId: string, @Body() body: AdminSetBarMenuDto) {
+    return this.adminBarsMenu.setBarMenu(barId, body.items);
   }
 
   @Get('reports')
