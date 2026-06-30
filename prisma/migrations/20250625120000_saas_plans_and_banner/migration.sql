@@ -1,6 +1,2 @@
--- Nuevos planes SaaS + columna banner (enum values deben commitearse antes del UPDATE)
-ALTER TYPE "SubscriptionPlan" ADD VALUE IF NOT EXISTS 'EXPLORER';
-ALTER TYPE "SubscriptionPlan" ADD VALUE IF NOT EXISTS 'INTERMEDIATE';
-ALTER TYPE "SubscriptionPlan" ADD VALUE IF NOT EXISTS 'LEGEND';
-
+-- Paso 1: columna banner (sin tocar el enum en la misma transacción)
 ALTER TABLE "bars" ADD COLUMN IF NOT EXISTS "banner_url" TEXT;
