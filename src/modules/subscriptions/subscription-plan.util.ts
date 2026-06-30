@@ -51,3 +51,16 @@ export function subscriptionPlanPriceMxn(plan: SubscriptionPlan): number {
       return 499;
   }
 }
+
+/** Plan Explorer: el admin asigna hasta N bebidas del catálogo para QR. */
+export function explorerQrDrinkLimit(): number {
+  return 15;
+}
+
+export function isExplorerPlan(plan: SubscriptionPlan): boolean {
+  return normalizeSubscriptionPlan(plan) === SubscriptionPlan.EXPLORER;
+}
+
+export function qrDrinkLimitForPlan(plan: SubscriptionPlan): number | null {
+  return isExplorerPlan(plan) ? explorerQrDrinkLimit() : null;
+}

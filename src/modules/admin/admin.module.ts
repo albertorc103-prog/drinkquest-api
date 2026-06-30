@@ -5,11 +5,12 @@ import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { AdminPromotionsController } from './admin-promotions.controller';
 import { AdminSubscriptionsController } from './admin-subscriptions.controller';
 import { AdminController } from './admin.controller';
+import { AdminBarsMenuService } from './admin-bars-menu.service';
 import { AdminService } from './admin.service';
 
 @Module({
   imports: [AuthModule, SubscriptionsModule, PromotionsModule],
   controllers: [AdminController, AdminSubscriptionsController, AdminPromotionsController],
-  providers: [AdminService],
+  providers: [AdminService, AdminBarsMenuService],
 })
 export class AdminModule {}

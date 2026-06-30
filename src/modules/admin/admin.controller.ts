@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Put, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ReportStatus, Role } from '@prisma/client';
 import { ApiAuthForbiddenResponses } from '../../common/decorators/api-auth-forbidden.decorator';
@@ -7,6 +7,8 @@ import { RequirePermissions } from '../auth/decorators/require-permissions.decor
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { AuthPermission } from '../auth/permissions/auth-permission.enum';
 import { AdminService } from './admin.service';
+import { AdminBarsMenuService } from './admin-bars-menu.service';
+import { AdminSetBarMenuDto } from './dto/admin-set-bar-menu.dto';
 
 @ApiTags('admin')
 @ApiBearerAuth()
@@ -14,7 +16,10 @@ import { AdminService } from './admin.service';
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('admin')
 export class AdminController {
-  constructor(private readonly admin: AdminService) {}
+  constructor(
+    private readonly admin: AdminService,
+    private readonly adminBarsMenu: AdminBarsMenuService,
+  ) {}
 
   @Get('analytics')
   @RequirePermissions(AuthPermission.VIEW_ANALYTICS)
@@ -42,6 +47,20 @@ export class AdminController {
   @ApiOperation({ summary: 'Detalle de un local con suscripción y branding' })
   bar(@Param('id') id: string) {
     return this.admin.getBar(id);
+  }
+
+  @Get('bars/:id/menu')
+  @RequirePermissions(AuthPermission.MANAGE_BARS)
+  @ApiOperation({ summary: 'Catálogo completo con bebidas asignadas al local (QR)' })
+  getBarMenu(@Param('id') id: string) {
+    return this.adminBarsMenu.getBarMenu(id);
+  }
+
+  @Put('bars/:id/menu')
+  @RequirePermissions(AuthPermission.MANAGE_BARS)
+  @ApiOperation({ summary: 'Asigna bebidas del catálogo al local (Explorer: máx. 15)' })
+  setBarMenu(@Param('id') id: string, @Body() body: AdminSetBarMenuDto) {
+    return this.adminBarsMenu.setBarMenu(id, body.items);
   }
 
   @Get('reports')

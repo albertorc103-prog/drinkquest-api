@@ -8,6 +8,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { PrismaService } from '../../database/prisma.service';
 import { BarAccessStateService } from '../subscriptions/bar-access-state.service';
+import { isExplorerPlan, normalizeSubscriptionPlan } from '../subscriptions/subscription-plan.util';
 import { BarsService } from './bars.service';
 
 @ApiTags('bars')
@@ -54,10 +55,28 @@ export class BarsController {
   async seedMenu(@CurrentUser() user: JwtPayload) {
     const bar = await this.bars.getByOwner(user.sub);
     if (!bar) return { seeded: false };
+    const subscription = await this.prisma.barSubscription.findUnique({
+      where: { barId: bar.id },
+      select: { plan: true },
+    });
+    const plan = normalizeSubscriptionPlan(subscription?.plan);
+    if (isExplorerPlan(plan)) {
+      const assigned = await this.prisma.barMenuItem.count({
+        where: { barId: bar.id, deletedAt: null, active: true },
+      });
+      if (assigned === 0) {
+        return {
+          seeded: false,
+          reason: 'EXPLORER_REQUIRES_ADMIN_MENU',
+          message: 'El administrador debe asignar las bebidas del catálogo para tu plan Explorer.',
+        };
+      }
+      return { seeded: false, reason: 'EXPLORER_ADMIN_ASSIGNED', assignedCount: assigned };
+    }
     const drinks = await this.prisma.drink.findMany({
       where: { deletedAt: null },
       orderBy: { legacyId: 'asc' },
-      take: 36,
+      take: 100,
       select: { id: true },
     });
     await this.bars.seedDefaultMenu(
