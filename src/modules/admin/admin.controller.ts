@@ -37,6 +37,13 @@ export class AdminController {
     return this.admin.listBars();
   }
 
+  @Get('bars/:id')
+  @RequirePermissions(AuthPermission.MANAGE_BARS)
+  @ApiOperation({ summary: 'Detalle de un local con suscripción y branding' })
+  bar(@Param('id') id: string) {
+    return this.admin.getBar(id);
+  }
+
   @Get('reports')
   @RequirePermissions(AuthPermission.MODERATE_CONTENT)
   @ApiOperation({ summary: 'Listar reportes (requiere moderate_content)' })

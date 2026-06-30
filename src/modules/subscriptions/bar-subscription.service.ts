@@ -44,7 +44,7 @@ export class BarSubscriptionService {
       data: {
         barId,
         status: SubscriptionStatus.TRIAL,
-        plan: options?.plan ?? SubscriptionPlan.BASIC,
+        plan: options?.plan ?? SubscriptionPlan.EXPLORER,
         trialEndsAt,
         currentPeriodEnd: trialEndsAt,
         qrEnabled: true,

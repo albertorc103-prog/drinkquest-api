@@ -83,8 +83,11 @@ enum SubscriptionStatus {
   CANCELED
 }
 
-/// Plan comercial del local (límites por plan en fases posteriores).
+/// Plan comercial del local (Explorer $499, Intermedio $1000, Legend $1500).
 enum SubscriptionPlan {
+  EXPLORER
+  INTERMEDIATE
+  LEGEND
   BASIC
   PRO
 }
@@ -242,6 +245,7 @@ model Bar {
   country      String?
   phone        String?
   logoUrl      String?  @map("logo_url")
+  bannerUrl    String?  @map("banner_url")
   isVerified   Boolean  @default(false) @map("is_verified")
   isActive     Boolean  @default(true) @map("is_active")
   createdAt    DateTime @default(now()) @map("created_at")
@@ -332,7 +336,7 @@ model BarSubscription {
   id                   String             @id @default(uuid()) @db.Uuid
   barId                String             @unique @map("bar_id") @db.Uuid
   status               SubscriptionStatus @default(TRIAL)
-  plan                 SubscriptionPlan   @default(BASIC)
+  plan                 SubscriptionPlan   @default(EXPLORER)
   currentPeriodEnd     DateTime?          @map("current_period_end")
   trialEndsAt          DateTime?          @map("trial_ends_at")
   qrEnabled            Boolean            @default(true) @map("qr_enabled")

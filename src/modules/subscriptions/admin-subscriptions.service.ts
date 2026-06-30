@@ -11,6 +11,10 @@ import { AdminActivateSubscriptionDto } from './dto/admin-activate-subscription.
 import { BarSubscriptionAdminResponseDto } from './dto/bar-subscription-response.dto';
 import { SubscriptionChangeContext } from './interfaces/subscription-change-context.interface';
 import { buildAdminResponse } from './mappers/bar-subscription-response.mapper';
+import {
+  normalizeSubscriptionPlan,
+  promotionsEnabledForPlan,
+} from './subscription-plan.util';
 
 @Injectable()
 export class AdminSubscriptionsService {
@@ -41,16 +45,17 @@ export class AdminSubscriptionsService {
 
     const periodDays = dto?.periodDays ?? 30;
     const periodEnd = this.subscriptions.addDays(new Date(), periodDays);
+    const plan = dto?.plan ? normalizeSubscriptionPlan(dto.plan) : normalizeSubscriptionPlan(sub.plan);
 
     const updated = await this.subscriptions.mutate(
       barId,
       {
         status: SubscriptionStatus.ACTIVE,
-        plan: dto?.plan ?? sub.plan,
+        plan,
         currentPeriodEnd: periodEnd,
         canceledAt: null,
         qrEnabled: true,
-        promoEnabled: true,
+        promoEnabled: promotionsEnabledForPlan(plan),
       },
       ctx,
       { eventType: SubscriptionEventType.ACTIVATED, statusChange: true },
@@ -103,16 +108,17 @@ export class AdminSubscriptionsService {
 
     const periodDays = dto?.periodDays ?? 30;
     const periodEnd = this.subscriptions.addDays(new Date(), periodDays);
+    const plan = dto?.plan ? normalizeSubscriptionPlan(dto.plan) : normalizeSubscriptionPlan(sub.plan);
 
     const updated = await this.subscriptions.mutate(
       barId,
       {
         status: SubscriptionStatus.ACTIVE,
-        plan: dto?.plan ?? sub.plan,
+        plan,
         currentPeriodEnd: periodEnd,
         canceledAt: null,
         qrEnabled: true,
-        promoEnabled: true,
+        promoEnabled: promotionsEnabledForPlan(plan),
       },
       this.adminCtx(adminId, dto?.reason),
       { eventType: SubscriptionEventType.REACTIVATED, statusChange: true },

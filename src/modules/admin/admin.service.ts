@@ -1,6 +1,21 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { ReportStatus, Role } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
+import { mapAdminBarRow } from './mappers/admin-bar.mapper';
+
+const barAdminInclude = {
+  owner: { select: { email: true, displayName: true } },
+  subscription: {
+    select: {
+      status: true,
+      plan: true,
+      trialEndsAt: true,
+      currentPeriodEnd: true,
+      qrEnabled: true,
+      promoEnabled: true,
+    },
+  },
+} as const;
 
 @Injectable()
 export class AdminService {
@@ -27,24 +42,23 @@ export class AdminService {
   }
 
   async listBars() {
-    return this.prisma.bar.findMany({
+    const bars = await this.prisma.bar.findMany({
       where: { deletedAt: null },
-      include: {
-        owner: { select: { email: true, displayName: true } },
-        subscription: {
-          select: {
-            id: true,
-            status: true,
-            plan: true,
-            trialEndsAt: true,
-            currentPeriodEnd: true,
-            qrEnabled: true,
-            promoEnabled: true,
-            lastStatusChangedAt: true,
-          },
-        },
-      },
+      include: barAdminInclude,
+      orderBy: { createdAt: 'desc' },
     });
+    return bars.map((bar) => mapAdminBarRow(bar));
+  }
+
+  async getBar(id: string) {
+    const bar = await this.prisma.bar.findFirst({
+      where: { id, deletedAt: null },
+      include: barAdminInclude,
+    });
+    if (!bar) {
+      throw new NotFoundException('Local no encontrado');
+    }
+    return mapAdminBarRow(bar);
   }
 
   async listReports(status?: ReportStatus) {
