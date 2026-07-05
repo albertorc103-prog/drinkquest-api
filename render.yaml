@@ -42,6 +42,16 @@ services:
         sync: false
       - key: MAIL_ENABLED
         value: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PRICE_EXPLORER
+        sync: false
+      - key: STRIPE_PRICE_INTERMEDIATE
+        sync: false
+      - key: STRIPE_PRICE_LEGEND
+        sync: false
 
 databases:
   - name: drinkquest-db

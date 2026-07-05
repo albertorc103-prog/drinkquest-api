@@ -7,6 +7,7 @@ import { RequestLoggingInterceptor } from './common/interceptors/request-logging
 import { AdminModule } from './modules/admin/admin.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { BarsModule } from './modules/bars/bars.module';
+import { PaymentsModule } from './modules/payments/payments.module';
 import { ChatModule } from './modules/chat/chat.module';
 import { DrinksModule } from './modules/drinks/drinks.module';
 import { FeedModule } from './modules/feed/feed.module';
@@ -52,6 +53,7 @@ import { SocketsModule } from './sockets/sockets.module';
     MissionsModule,
     FeedModule,
     BarsModule,
+    PaymentsModule,
     AdminModule,
     PromotionsModule,
     NotificationsModule,

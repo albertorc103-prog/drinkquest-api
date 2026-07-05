@@ -12,7 +12,7 @@ import { ConfigurableIoAdapter } from './common/adapters/configurable-io.adapter
 import { buildCorsOptions } from './common/utils/cors.util';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create(AppModule, { bufferLogs: true, rawBody: true });
   const config = app.get(ConfigService);
   const logger = app.get(WINSTON_MODULE_NEST_PROVIDER);
   app.useLogger(logger);

@@ -7,6 +7,8 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { PrismaService } from '../../database/prisma.service';
+import { BarStripeCheckoutService } from '../payments/bar-stripe-checkout.service';
+import { CreateBarCheckoutDto } from '../payments/dto/create-bar-checkout.dto';
 import { BarAccessStateService } from '../subscriptions/bar-access-state.service';
 import { isExplorerPlan, normalizeSubscriptionPlan } from '../subscriptions/subscription-plan.util';
 import { BarsService } from './bars.service';
@@ -21,6 +23,7 @@ export class BarsController {
     private readonly bars: BarsService,
     private readonly prisma: PrismaService,
     private readonly accessStateService: BarAccessStateService,
+    private readonly stripeCheckout: BarStripeCheckoutService,
   ) {}
 
   @Get('me')
@@ -34,6 +37,15 @@ export class BarsController {
   })
   accessState(@CurrentUser() user: JwtPayload) {
     return this.accessStateService.getStateForOwner(user.sub);
+  }
+
+  @Post('subscription/checkout')
+  @ApiOperation({ summary: 'Crea sesión Stripe Checkout para contratar o cambiar plan' })
+  createSubscriptionCheckout(
+    @CurrentUser() user: JwtPayload,
+    @Body() body: CreateBarCheckoutDto,
+  ) {
+    return this.stripeCheckout.createCheckoutSession(user.sub, body.plan);
   }
 
   @Get('dashboard')
