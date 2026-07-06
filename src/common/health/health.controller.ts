@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { ApiTags } from '@nestjs/swagger';
 import Redis from 'ioredis';
 import { PrismaService } from '../../database/prisma.service';
+import { MailService } from '../../modules/notifications/mail.service';
 import { REDIS_CLIENT } from '../redis/redis.constants';
 import { AppException } from '../errors/app-exception';
 
@@ -15,6 +16,7 @@ export class HealthController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly mail: MailService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {}
 
@@ -70,11 +72,15 @@ export class HealthController {
       checks.redis = 'degraded';
     }
 
-    checks.mail =
-      this.config.get<boolean>('smtp.enabled') === true &&
-      !!this.config.get<string>('smtp.host')
-        ? 'ok'
-        : 'degraded';
+    try {
+      if (!this.mail.isMailEnabled()) {
+        checks.mail = 'degraded';
+      } else {
+        checks.mail = (await this.mail.verifyConnection()) ? 'ok' : 'degraded';
+      }
+    } catch {
+      checks.mail = 'degraded';
+    }
 
     const requiredEnvKeys = ['DATABASE_URL', 'JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET'];
     const missing = requiredEnvKeys.filter((key) => !process.env[key]);

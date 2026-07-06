@@ -10,16 +10,22 @@ export class MailService {
   constructor(private readonly config: ConfigService) {
     if (this.isMailEnabled()) {
       const host = this.config.get<string>('smtp.host')!;
-      this.transporter = nodemailer.createTransport({
-        host,
-        port: this.config.get<number>('smtp.port'),
-        secure: this.config.get<boolean>('smtp.secure'),
-        auth: {
-          user: this.config.get<string>('smtp.user'),
-          pass: this.config.get<string>('smtp.pass'),
-        },
-      });
-      this.logger.log(`SMTP enabled (${host}:${this.config.get<number>('smtp.port')})`);
+      const port = this.config.get<number>('smtp.port') ?? 587;
+      const user = this.config.get<string>('smtp.user');
+      const pass = this.config.get<string>('smtp.pass');
+      if (!user || !pass) {
+        this.logger.warn('MAIL_ENABLED=true pero faltan SMTP_USER o SMTP_PASS');
+        this.transporter = null;
+      } else {
+        this.transporter = nodemailer.createTransport({
+          host,
+          port,
+          secure: port === 465,
+          requireTLS: port === 587,
+          auth: { user, pass },
+        });
+        this.logger.log(`SMTP enabled (${host}:${port}, from=${this.config.get<string>('smtp.from')})`);
+      }
     } else {
       this.transporter = null;
       this.logger.log('SMTP disabled (MAIL_ENABLED=false or SMTP_HOST empty)');
@@ -30,6 +36,19 @@ export class MailService {
     if (this.config.get<boolean>('smtp.enabled') !== true) return false;
     const host = this.config.get<string>('smtp.host');
     return typeof host === 'string' && host.length > 0;
+  }
+
+  /** Comprueba login SMTP (no envía correo). */
+  async verifyConnection(): Promise<boolean> {
+    if (!this.transporter) return false;
+    try {
+      await this.transporter.verify();
+      return true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`SMTP verify failed: ${message}`);
+      return false;
+    }
   }
 
   private authLink(template: string, token: string): string {
@@ -70,15 +89,17 @@ export class MailService {
 
   private async send(to: string, subject: string, text: string): Promise<void> {
     if (!this.transporter) {
-      return;
+      throw new Error('SMTP no configurado en el servidor');
     }
+    const from = this.config.get<string>('smtp.from');
     try {
-      await this.transporter.sendMail({
-        from: this.config.get('smtp.from'),
+      const info = await this.transporter.sendMail({
+        from: from?.includes('<') ? from : `DrinkQuest <${from}>`,
         to,
         subject,
         text,
       });
+      this.logger.log(`SMTP sent to ${to} (${subject}) id=${info.messageId ?? 'n/a'}`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.warn(`SMTP send failed (${to}, ${subject}): ${message}`);

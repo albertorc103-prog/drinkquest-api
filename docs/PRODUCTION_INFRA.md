@@ -146,9 +146,9 @@ MAIL_ENABLED=true
 SMTP_HOST=smtp-relay.brevo.com
 SMTP_PORT=587
 SMTP_SECURE=false
-SMTP_USER=tu-email@brevo.com
+SMTP_USER=tu-login-de-brevo@gmail.com
 SMTP_PASS=xsmtpsib-...
-SMTP_FROM=noreply@tudominio.com
+SMTP_FROM=albertorc103@gmail.com
 EMAIL_VERIFY_URL=drinkquest://auth/verify?token={token}
 EMAIL_RESET_URL=drinkquest://auth/reset?token={token}
 ```
@@ -209,6 +209,9 @@ SMTP_FROM=onboarding@resend.dev
 | `redis: degraded` | `REDIS_URL` vacía o incorrecta | Upstash URL completa |
 | `ERR Only 0th database is supported` | URL con `/22` | Ya corregido en código; redeploy |
 | Email no llega | `MAIL_ENABLED=false` o sender no verificado | Brevo sender + `MAIL_ENABLED=true` |
+| `mail: degraded` en health | `SMTP_USER`/`SMTP_PASS` incorrectos | Login Brevo + clave SMTP `xsmtpsib-...` |
+| Brevo rechaza envío | `SMTP_FROM` no está en Senders verificados | Usar exactamente `jefe.vd@gmail.com` o `albertorc103@gmail.com` |
+| Registro sin correo | Falló SMTP al registrarse (error silencioso) | Pulsa **Reenviar** en perfil tras configurar SMTP |
 | Enlace email no abre app | URL web en vez de deep link | Usar `EMAIL_VERIFY_URL` de arriba |
 
 ---
