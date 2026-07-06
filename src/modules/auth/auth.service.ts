@@ -27,6 +27,8 @@ import { UsersService } from '../users/users.service';
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
+  /** Mínimo entre reenvíos (evita bloqueo de Brevo y spam). */
+  private static readonly RESEND_COOLDOWN_MS = 60_000;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -77,12 +79,7 @@ export class AuthService {
       return created;
     });
 
-    try {
-      await this.sendEmailVerification(user.id, user.email);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`Register OK but verification email failed: ${message}`);
-    }
+    this.queueEmailVerification(user.id, user.email);
     return this.issueTokensForUser(user.id, user.email, user.role);
   }
 
@@ -199,17 +196,47 @@ export class AuthService {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new BadRequestException('Usuario no encontrado');
     if (user.emailVerified) throw new BadRequestException('Email ya verificado');
-    try {
-      await this.sendEmailVerification(user.id, user.email);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`Resend verification failed: ${message}`);
-      throw new BadRequestException('No se pudo enviar el correo de verificación');
+    if (!this.mail.isConfigured()) {
+      throw new BadRequestException('El envío de correo no está configurado en el servidor');
     }
-    return { message: 'Email de verificación enviado' };
+
+    const recent = await this.prisma.emailVerification.findFirst({
+      where: { userId, usedAt: null },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (recent) {
+      const elapsed = Date.now() - recent.createdAt.getTime();
+      if (elapsed < AuthService.RESEND_COOLDOWN_MS) {
+        const waitSec = Math.ceil((AuthService.RESEND_COOLDOWN_MS - elapsed) / 1000);
+        throw new BadRequestException(
+          `Espera ${waitSec} s antes de reenviar. El correo anterior puede seguir en camino (revisa spam).`,
+        );
+      }
+    }
+
+    const token = await this.createVerificationToken(userId);
+    this.mail.dispatchEmailVerification(user.email, token);
+    return {
+      message: 'Email de verificación en cola. Puede tardar 1–2 minutos; revisa spam si no llega.',
+    };
   }
 
-  private async sendEmailVerification(userId: string, email: string) {
+  /** Crea token y encola envío sin bloquear la respuesta HTTP. */
+  private async queueEmailVerification(userId: string, email: string): Promise<void> {
+    if (!this.mail.isConfigured()) {
+      this.logger.warn('Register OK but MAIL not configured');
+      return;
+    }
+    try {
+      const token = await this.createVerificationToken(userId);
+      this.mail.dispatchEmailVerification(email, token);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Register OK but verification token failed: ${message}`);
+    }
+  }
+
+  private async createVerificationToken(userId: string): Promise<string> {
     const token = randomToken();
     await this.prisma.emailVerification.create({
       data: {
@@ -218,7 +245,7 @@ export class AuthService {
         expiresAt: new Date(Date.now() + 86400_000),
       },
     });
-    await this.mail.sendEmailVerification(email, token);
+    return token;
   }
 
   async getMe(jwtUser: JwtPayload): Promise<AuthMeResponseDto> {

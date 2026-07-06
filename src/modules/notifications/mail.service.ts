@@ -23,9 +23,12 @@ export class MailService {
           secure: port === 465,
           requireTLS: port === 587,
           auth: { user, pass },
-          connectionTimeout: 15_000,
-          greetingTimeout: 15_000,
-          socketTimeout: 30_000,
+          pool: true,
+          maxConnections: 1,
+          maxMessages: 10,
+          connectionTimeout: 10_000,
+          greetingTimeout: 10_000,
+          socketTimeout: 20_000,
         });
         this.logger.log(`SMTP enabled (${host}:${port}, from=${this.config.get<string>('smtp.from')})`);
       }
@@ -39,6 +42,10 @@ export class MailService {
     if (this.config.get<boolean>('smtp.enabled') !== true) return false;
     const host = this.config.get<string>('smtp.host');
     return typeof host === 'string' && host.length > 0;
+  }
+
+  isConfigured(): boolean {
+    return this.isMailEnabled() && this.transporter !== null;
   }
 
   /** Comprueba login SMTP (no envía correo). */
@@ -70,8 +77,16 @@ export class MailService {
     await this.send(
       to,
       'Verifica tu email — DrinkQuest',
-      `Abre este enlace en tu teléfono con DrinkQuest instalada:\n\n${url}\n\nSi no se abre la app, copia el enlace en el navegador.`,
+      `Hola,\n\nToca este enlace en tu teléfono (con DrinkQuest instalada):\n\n${url}\n\nEl enlace caduca en 24 horas. Si no abre la app, copia la URL completa en el navegador.\n\n— DrinkQuest`,
     );
+  }
+
+  /** No bloquea la petición HTTP; errores solo en logs. */
+  dispatchEmailVerification(to: string, token: string): void {
+    void this.sendEmailVerification(to, token).catch((err) => {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Async verification email failed (${to}): ${message}`);
+    });
   }
 
   async sendPasswordReset(to: string, token: string): Promise<void> {

@@ -73,6 +73,7 @@ export class AuthController {
   @Post('resend-verification')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
+  @Throttle({ default: { limit: 5, ttl: 300_000 } })
   @ApiOperation({ summary: 'Reenviar email de verificación' })
   resend(@CurrentUser() user: { sub: string }) {
     return this.auth.resendVerification(user.sub);

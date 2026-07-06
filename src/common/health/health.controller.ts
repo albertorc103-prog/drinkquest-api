@@ -1,4 +1,5 @@
 import { Controller, Get, Inject } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import { ConfigService } from '@nestjs/config';
 import { ApiTags } from '@nestjs/swagger';
 import Redis from 'ioredis';
@@ -11,6 +12,7 @@ type DependencyStatus = 'ok' | 'degraded' | 'error';
 type HealthService = 'database' | 'prisma' | 'jwt' | 'storage' | 'redis' | 'mail' | 'env';
 
 @ApiTags('health')
+@SkipThrottle()
 @Controller('health')
 export class HealthController {
   constructor(
@@ -73,11 +75,7 @@ export class HealthController {
     }
 
     try {
-      if (!this.mail.isMailEnabled()) {
-        checks.mail = 'degraded';
-      } else {
-        checks.mail = (await this.mail.verifyConnection()) ? 'ok' : 'degraded';
-      }
+      checks.mail = this.mail.isConfigured() ? 'ok' : 'degraded';
     } catch {
       checks.mail = 'degraded';
     }
