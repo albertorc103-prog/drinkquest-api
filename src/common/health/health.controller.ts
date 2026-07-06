@@ -1,11 +1,13 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ApiTags } from '@nestjs/swagger';
+import Redis from 'ioredis';
 import { PrismaService } from '../../database/prisma.service';
+import { REDIS_CLIENT } from '../redis/redis.constants';
 import { AppException } from '../errors/app-exception';
 
 type DependencyStatus = 'ok' | 'degraded' | 'error';
-type HealthService = 'database' | 'prisma' | 'jwt' | 'storage' | 'env';
+type HealthService = 'database' | 'prisma' | 'jwt' | 'storage' | 'redis' | 'mail' | 'env';
 
 @ApiTags('health')
 @Controller('health')
@@ -13,6 +15,7 @@ export class HealthController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {}
 
   @Get()
@@ -22,6 +25,8 @@ export class HealthController {
       prisma: 'error',
       jwt: 'error',
       storage: 'error',
+      redis: 'error',
+      mail: 'degraded',
       env: 'error',
     };
 
@@ -46,7 +51,10 @@ export class HealthController {
       const bucket = this.config.get<string>('minio.bucket');
       const accessKey = this.config.get<string>('minio.accessKey');
       const secretKey = this.config.get<string>('minio.secretKey');
-      if (endpoint && bucket && accessKey && secretKey) {
+      const misconfigured = this.config.get<boolean>('minio.storageMisconfiguredForClients');
+      if (misconfigured) {
+        checks.storage = 'degraded';
+      } else if (endpoint && bucket && accessKey && secretKey) {
         checks.storage = 'ok';
       } else {
         checks.storage = 'degraded';
@@ -54,6 +62,19 @@ export class HealthController {
     } catch {
       /* storage config inválida */
     }
+
+    try {
+      const pong = await this.redis.ping();
+      checks.redis = pong === 'PONG' ? 'ok' : 'degraded';
+    } catch {
+      checks.redis = 'degraded';
+    }
+
+    checks.mail =
+      this.config.get<boolean>('smtp.enabled') === true &&
+      !!this.config.get<string>('smtp.host')
+        ? 'ok'
+        : 'degraded';
 
     const requiredEnvKeys = ['DATABASE_URL', 'JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET'];
     const missing = requiredEnvKeys.filter((key) => !process.env[key]);

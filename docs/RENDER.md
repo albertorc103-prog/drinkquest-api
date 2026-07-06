@@ -86,7 +86,9 @@ SEED_ADMIN_PASSWORD=<tu-contraseña-segura>
 Render no incluye Redis/MinIO en el plan gratuito del Web Service:
 
 - **Redis:** [Upstash](https://upstash.com) o Render Key Value → pega `REDIS_URL`.
-- **Archivos:** AWS S3 o R2 con variables `MINIO_*` (el SDK es compatible S3).
+- **Archivos:** AWS S3 o Cloudflare R2 con variables `MINIO_*` (el SDK es compatible S3).
+
+**Guía detallada paso a paso:** [PRODUCTION_INFRA.md](./PRODUCTION_INFRA.md) (R2, Upstash, Brevo SMTP, checklist Render).
 
 ## 5. Verificar deploy
 

@@ -1,7 +1,7 @@
 # DrinkQuest API — Render Blueprint (opcional)
 # https://render.com/docs/blueprint-spec
 #
-# Crea PostgreSQL y Web Service. Redis/MinIO: añade servicios externos o instancias aparte.
+# PostgreSQL incluido. Redis, R2/S3 y SMTP: servicios externos (ver docs/PRODUCTION_INFRA.md).
 
 services:
   - type: web
@@ -11,7 +11,6 @@ services:
     plan: free
     buildCommand: npm ci && npm run render:build
     startCommand: npm run render:start
-    # render:start → migrate deploy + seed (admin idempotente) + node dist/main.js
     healthCheckPath: /api/v1/health
     envVars:
       - key: NODE_ENV
@@ -34,14 +33,48 @@ services:
         sync: false
       - key: CORS_ORIGINS
         sync: false
+      - key: TRUST_PROXY
+        value: "true"
+      # ─── Redis (Upstash o Render Key Value) ───
       - key: REDIS_URL
         sync: false
+      # ─── Storage S3/R2 ───
       - key: MINIO_ENDPOINT
+        sync: false
+      - key: MINIO_PORT
+        sync: false
+      - key: MINIO_USE_SSL
+        sync: false
+      - key: MINIO_REGION
+        sync: false
+      - key: MINIO_ROOT_USER
+        sync: false
+      - key: MINIO_ROOT_PASSWORD
+        sync: false
+      - key: MINIO_BUCKET
         sync: false
       - key: MINIO_PUBLIC_URL
         sync: false
+      # ─── Email SMTP ───
       - key: MAIL_ENABLED
-        value: false
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_SECURE
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: EMAIL_VERIFY_URL
+        sync: false
+      - key: EMAIL_RESET_URL
+        sync: false
+      # ─── Stripe ───
       - key: STRIPE_SECRET_KEY
         sync: false
       - key: STRIPE_WEBHOOK_SECRET
@@ -51,6 +84,15 @@ services:
       - key: STRIPE_PRICE_INTERMEDIATE
         sync: false
       - key: STRIPE_PRICE_LEGEND
+        sync: false
+      - key: STRIPE_CHECKOUT_SUCCESS_URL
+        sync: false
+      - key: STRIPE_CHECKOUT_CANCEL_URL
+        sync: false
+      # ─── Admin seed ───
+      - key: SEED_ADMIN_EMAIL
+        sync: false
+      - key: SEED_ADMIN_PASSWORD
         sync: false
 
 databases:
