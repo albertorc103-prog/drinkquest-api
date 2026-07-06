@@ -28,7 +28,7 @@ function run(command, args, label, { allowFailure = false } = {}) {
 /** Repara P3009: migración SaaS fallida en el primer deploy (enum + UPDATE en misma tx). */
 const FAILED_SAAS_MIGRATIONS = [
   '20250625120000_saas_plans_and_banner',
-  '20250625120001_saas_plans_data',
+  '20250625120002_saas_plans_data',
   '20250625120001_saas_plans_enum',
 ];
 
