@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 import { REDIS_CLIENT } from './redis.constants';
 import { RedisService } from './redis.service';
-import { normalizeRedisUrl } from './redis-url.util';
+import { createRedisClient } from './redis-url.util';
 
 @Global()
 @Module({
@@ -13,12 +13,15 @@ import { normalizeRedisUrl } from './redis-url.util';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
         const url = config.get<string>('redis.url');
-        if (url) return new Redis(normalizeRedisUrl(url));
-        return new Redis({
+        if (url) return createRedisClient(url);
+        const client = new Redis({
           host: config.get('redis.host'),
           port: config.get<number>('redis.port'),
           password: config.get('redis.password'),
+          db: 0,
         });
+        client.on('error', () => {});
+        return client;
       },
     },
     RedisService,

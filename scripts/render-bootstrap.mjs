@@ -25,20 +25,22 @@ function run(command, args, label, { allowFailure = false } = {}) {
   return true;
 }
 
-/** Repara P3009: migración SaaS fallida en el primer deploy (enum + UPDATE en misma tx). */
+/** Repara P3009 solo si RENDER_BOOTSTRAP_REPAIR_SAAS=1 (primer deploy con migración fallida). */
 const FAILED_SAAS_MIGRATIONS = [
   '20250625120000_saas_plans_and_banner',
   '20250625120002_saas_plans_data',
   '20250625120001_saas_plans_enum',
 ];
 
-for (const name of FAILED_SAAS_MIGRATIONS) {
-  run(
-    'npx',
-    ['prisma', 'migrate', 'resolve', '--rolled-back', name],
-    `repair failed migration ${name}`,
-    { allowFailure: true },
-  );
+if (process.env.RENDER_BOOTSTRAP_REPAIR_SAAS === '1') {
+  for (const name of FAILED_SAAS_MIGRATIONS) {
+    run(
+      'npx',
+      ['prisma', 'migrate', 'resolve', '--rolled-back', name],
+      `repair failed migration ${name}`,
+      { allowFailure: true },
+    );
+  }
 }
 
 run('npx', ['prisma', 'migrate', 'deploy'], 'prisma migrate deploy');
