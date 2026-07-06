@@ -23,6 +23,9 @@ export class MailService {
           secure: port === 465,
           requireTLS: port === 587,
           auth: { user, pass },
+          connectionTimeout: 15_000,
+          greetingTimeout: 15_000,
+          socketTimeout: 30_000,
         });
         this.logger.log(`SMTP enabled (${host}:${port}, from=${this.config.get<string>('smtp.from')})`);
       }
