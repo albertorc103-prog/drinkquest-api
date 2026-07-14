@@ -26,10 +26,20 @@ export class MissionsService {
       where: { triggerKey, isActive: true, deletedAt: null },
     });
     for (const mission of missions) {
+      const existing = await this.prisma.userMission.findUnique({
+        where: { userId_missionId: { userId, missionId: mission.id } },
+      });
+      if (
+        existing?.status === MissionStatus.COMPLETED ||
+        existing?.status === MissionStatus.CLAIMED
+      ) {
+        continue;
+      }
+
       const row = await this.prisma.userMission.upsert({
         where: { userId_missionId: { userId, missionId: mission.id } },
         create: { userId, missionId: mission.id, status: MissionStatus.IN_PROGRESS, progress: amount },
-        update: { progress: { increment: amount }, status: MissionStatus.IN_PROGRESS },
+        update: { progress: { increment: amount } },
       });
       if (row.progress >= mission.targetCount && row.status !== MissionStatus.COMPLETED) {
         await this.prisma.userMission.update({

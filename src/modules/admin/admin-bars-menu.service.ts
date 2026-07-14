@@ -28,8 +28,11 @@ export class AdminBarsMenuService {
 
     const [drinks, menuItems] = await Promise.all([
       this.prisma.drink.findMany({
-        where: { deletedAt: null },
-        orderBy: [{ name: 'asc' }],
+        where: {
+          deletedAt: null,
+          legacyId: { gte: 1, lte: 100 },
+        },
+        orderBy: [{ legacyId: 'asc' }],
         include: { category: { select: { name: true } } },
       }),
       this.prisma.barMenuItem.findMany({
@@ -57,6 +60,7 @@ export class AdminBarsMenuService {
           category: drink.category.name,
           slug: drink.slug,
           rarity: drink.rarity,
+          imageKey: drink.imageKey,
           assigned: !!menu,
           active: menu?.active ?? false,
           featured: menu?.featured ?? false,
@@ -80,7 +84,11 @@ export class AdminBarsMenuService {
 
     const drinkIds = items.map((item) => item.drinkId);
     const validDrinks = await this.prisma.drink.findMany({
-      where: { id: { in: drinkIds }, deletedAt: null },
+      where: {
+        id: { in: drinkIds },
+        deletedAt: null,
+        legacyId: { gte: 1, lte: 100 },
+      },
       select: { id: true },
     });
     const validIds = new Set(validDrinks.map((d) => d.id));

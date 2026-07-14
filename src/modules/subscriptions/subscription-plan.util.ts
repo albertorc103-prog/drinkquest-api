@@ -35,9 +35,31 @@ export function normalizeSubscriptionPlan(
   }
 }
 
-/** Promos ilimitadas desde plan Intermedio en adelante. */
+/** Promociones habilitadas para todos los planes (Explorer con tope de activas). */
 export function promotionsEnabledForPlan(plan: SubscriptionPlan): boolean {
-  return plan === SubscriptionPlan.INTERMEDIATE || plan === SubscriptionPlan.LEGEND;
+  switch (normalizeSubscriptionPlan(plan)) {
+    case SubscriptionPlan.EXPLORER:
+    case SubscriptionPlan.INTERMEDIATE:
+    case SubscriptionPlan.LEGEND:
+      return true;
+    default:
+      return false;
+  }
+}
+
+/**
+ * Límite de promociones ACTIVAS simultáneas por plan.
+ * `null` = ilimitado. Explorer permite hasta 3; el resto se define en fases posteriores.
+ */
+export function activePromotionLimitForPlan(plan: SubscriptionPlan): number | null {
+  switch (normalizeSubscriptionPlan(plan)) {
+    case SubscriptionPlan.EXPLORER:
+      return 3;
+    case SubscriptionPlan.INTERMEDIATE:
+    case SubscriptionPlan.LEGEND:
+    default:
+      return null;
+  }
 }
 
 export function subscriptionPlanPriceMxn(plan: SubscriptionPlan): number {

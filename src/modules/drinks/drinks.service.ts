@@ -11,6 +11,7 @@ export class DrinksService {
     const limit = Math.min(params.limit ?? 20, 100);
     const where: Prisma.DrinkWhereInput = {
       deletedAt: null,
+      legacyId: { gte: 1, lte: 100 },
       ...(params.categoryId && { categoryId: params.categoryId }),
       ...(params.rarity && { rarity: params.rarity }),
       ...(params.search && {
@@ -21,7 +22,7 @@ export class DrinksService {
       this.prisma.drink.findMany({
         where,
         include: { category: true },
-        orderBy: { name: 'asc' },
+        orderBy: { legacyId: 'asc' },
         skip: (page - 1) * limit,
         take: limit,
       }),

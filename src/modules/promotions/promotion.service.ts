@@ -8,6 +8,10 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { BarAccessService } from '../subscriptions/bar-access.service';
+import {
+  activePromotionLimitForPlan,
+  normalizeSubscriptionPlan,
+} from '../subscriptions/subscription-plan.util';
 import { PromotionAnalyticsService } from './promotion-analytics.service';
 import { CreatePromotionDto } from './dto/create-promotion.dto';
 import { PromotionResponseDto } from './dto/promotion-response.dto';
@@ -156,7 +160,7 @@ export class PromotionService {
   }
 
   async activatePromotion(ownerUserId: string, promotionId: string): Promise<PromotionResponseDto> {
-    await this.barAccess.assertOwnerCanUsePromotions(ownerUserId);
+    const { bar, subscription } = await this.barAccess.assertOwnerCanUsePromotions(ownerUserId);
     const promo = await this.requireOwnedPromotion(ownerUserId, promotionId);
 
     if (promo.status === PromotionStatus.ACTIVE) {
@@ -167,6 +171,20 @@ export class PromotionService {
 
     if (promo.approvalStatus !== PromotionApprovalStatus.APPROVED) {
       throw new BadRequestException('La promoción debe estar aprobada por administración.');
+    }
+
+    const activeLimit = activePromotionLimitForPlan(
+      normalizeSubscriptionPlan(subscription?.plan),
+    );
+    if (activeLimit != null) {
+      const activeCount = await this.prisma.barPromotion.count({
+        where: { barId: bar.id, status: PromotionStatus.ACTIVE },
+      });
+      if (activeCount >= activeLimit) {
+        throw new BadRequestException(
+          `Tu plan permite máximo ${activeLimit} promociones activas al mismo tiempo. Pausa una para poder activar otra.`,
+        );
+      }
     }
 
     const updated = await this.prisma.barPromotion.update({
