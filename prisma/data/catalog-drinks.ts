@@ -1,5 +1,5 @@
 import { DrinkRarity } from '@prisma/client';
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 
 export type DemoDrinkSeed = {
@@ -95,9 +95,26 @@ function toDemoDrink(row: CanonicalRow): DemoDrinkSeed {
   };
 }
 
-export const DEMO_DRINKS: DemoDrinkSeed[] = (
-  JSON.parse(readFileSync(join(__dirname, 'canonical-catalog.json'), 'utf8')) as CanonicalRow[]
-).map(toDemoDrink);
+/**
+ * Resuelve `canonical-catalog.json` probando varias rutas: junto al módulo (ts-node),
+ * y relativo a la raíz del proyecto (build compilado en `dist-seed`, donde el JSON no se copia).
+ */
+function readCanonicalCatalog(): CanonicalRow[] {
+  const candidates = [
+    join(__dirname, 'canonical-catalog.json'),
+    join(process.cwd(), 'prisma', 'data', 'canonical-catalog.json'),
+    join(process.cwd(), 'dist-seed', 'prisma', 'data', 'canonical-catalog.json'),
+  ];
+  const found = candidates.find((path) => existsSync(path));
+  if (!found) {
+    throw new Error(
+      `No se encontró canonical-catalog.json. Rutas probadas: ${candidates.join(', ')}`,
+    );
+  }
+  return JSON.parse(readFileSync(found, 'utf8')) as CanonicalRow[];
+}
+
+export const DEMO_DRINKS: DemoDrinkSeed[] = readCanonicalCatalog().map(toDemoDrink);
 
 if (DEMO_DRINKS.length !== CANONICAL_CATALOG_SIZE) {
   throw new Error(`canonical-catalog.json debe tener ${CANONICAL_CATALOG_SIZE} bebidas`);
