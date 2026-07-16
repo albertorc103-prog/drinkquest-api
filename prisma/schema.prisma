@@ -303,7 +303,8 @@ model BarSpecialDrink {
   updatedAt          DateTime                   @updatedAt @map("updated_at")
   deletedAt          DateTime?                  @map("deleted_at")
 
-  bar Bar @relation(fields: [barId], references: [id], onDelete: Cascade)
+  bar               Bar    @relation(fields: [barId], references: [id], onDelete: Cascade)
+  materializedDrink Drink?
 
   @@index([barId])
   @@index([approvalStatus])
@@ -446,38 +447,43 @@ model DrinkCategory {
 }
 
 model Drink {
-  id             String      @id @default(uuid()) @db.Uuid
-  legacyId       Int?        @unique @map("legacy_id")
-  slug           String      @unique
-  name           String
-  categoryId     String      @map("category_id") @db.Uuid
-  rarity         DrinkRarity @default(COMMON)
-  imageKey       String?     @map("image_key")
-  imageUrl       String?     @map("image_url")
-  description    String?
-  ingredients    String?
-  flavorProfile  String?     @map("flavor_profile")
-  alcoholLevel   String?     @map("alcohol_level")
-  baseAlcohol    String?     @map("base_alcohol")
-  difficulty     String?
-  xpReward       Int         @default(10) @map("xp_reward")
-  countryOrigin  String?     @map("country_origin")
-  isPalomaFamily Boolean     @default(false) @map("is_paloma_family")
-  containsMezcal Boolean     @default(false) @map("contains_mezcal")
-  createdAt      DateTime    @default(now()) @map("created_at")
-  updatedAt      DateTime    @updatedAt @map("updated_at")
-  deletedAt      DateTime?   @map("deleted_at")
+  id                   String      @id @default(uuid()) @db.Uuid
+  legacyId             Int?        @unique @map("legacy_id")
+  slug                 String      @unique
+  name                 String
+  categoryId           String      @map("category_id") @db.Uuid
+  rarity               DrinkRarity @default(COMMON)
+  imageKey             String?     @map("image_key")
+  imageUrl             String?     @map("image_url")
+  description          String?
+  ingredients          String?
+  flavorProfile        String?     @map("flavor_profile")
+  alcoholLevel         String?     @map("alcohol_level")
+  baseAlcohol          String?     @map("base_alcohol")
+  difficulty           String?
+  xpReward             Int         @default(10) @map("xp_reward")
+  countryOrigin        String?     @map("country_origin")
+  isPalomaFamily       Boolean     @default(false) @map("is_paloma_family")
+  containsMezcal       Boolean     @default(false) @map("contains_mezcal")
+  /// Si no es null, esta bebida materializa una BarSpecialDrink (fuera del catálogo 1–100).
+  sourceSpecialDrinkId String?     @unique @map("source_special_drink_id") @db.Uuid
+  originBarId          String?     @map("origin_bar_id") @db.Uuid
+  createdAt            DateTime    @default(now()) @map("created_at")
+  updatedAt            DateTime    @updatedAt @map("updated_at")
+  deletedAt            DateTime?   @map("deleted_at")
 
-  category       DrinkCategory     @relation(fields: [categoryId], references: [id])
-  barMenuItems   BarMenuItem[]
-  qrSessions     QrSession[]
-  unlocks        UserDrinkUnlock[]
-  history        DrinkHistoryEntry[]
-  favorites      UserFavoriteDrink[]
+  category             DrinkCategory     @relation(fields: [categoryId], references: [id])
+  sourceSpecialDrink   BarSpecialDrink?  @relation(fields: [sourceSpecialDrinkId], references: [id], onDelete: SetNull)
+  barMenuItems         BarMenuItem[]
+  qrSessions           QrSession[]
+  unlocks              UserDrinkUnlock[]
+  history              DrinkHistoryEntry[]
+  favorites            UserFavoriteDrink[]
 
   @@index([categoryId])
   @@index([rarity])
   @@index([deletedAt])
+  @@index([originBarId])
   @@map("drinks")
 }
 

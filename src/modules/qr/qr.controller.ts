@@ -28,6 +28,7 @@ export class QrController {
     return this.qr.createSession(user.sub, {
       drinkId: dto.drinkId,
       legacyDrinkId: dto.legacyDrinkId,
+      specialDrinkId: dto.specialDrinkId,
     });
   }
 

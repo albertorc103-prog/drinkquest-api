@@ -18,6 +18,7 @@ import {
 } from '../subscriptions/subscription-plan.util';
 import { CreateSpecialDrinkDto, UpdateSpecialDrinkDto } from './dto/special-drink.dto';
 import { mapSpecialDrink } from './mappers/special-drink.mapper';
+import { deactivateSpecialDrinkMenu } from './special-drink-materialize.util';
 
 @Injectable()
 export class SpecialDrinksService {
@@ -30,6 +31,7 @@ export class SpecialDrinksService {
     const { bar } = await this.assertOwnerCanManageSpecialDrinks(ownerUserId);
     const rows = await this.prisma.barSpecialDrink.findMany({
       where: { barId: bar.id, deletedAt: null },
+      include: { materializedDrink: { select: { id: true } } },
       orderBy: { createdAt: 'desc' },
     });
     const limit = specialDrinkLimitForPlan(
@@ -93,6 +95,10 @@ export class SpecialDrinksService {
       drink.approvalStatus === SpecialDrinkApprovalStatus.REJECTED ||
       drink.approvalStatus === SpecialDrinkApprovalStatus.FLAGGED;
 
+    if (needsReReview) {
+      await deactivateSpecialDrinkMenu(this.prisma, drink.id);
+    }
+
     const updated = await this.prisma.barSpecialDrink.update({
       where: { id: drink.id },
       data: {
@@ -112,6 +118,7 @@ export class SpecialDrinksService {
             }
           : {}),
       },
+      include: { materializedDrink: { select: { id: true } } },
     });
     return mapSpecialDrink(updated);
   }
@@ -135,6 +142,7 @@ export class SpecialDrinksService {
         moderatedAt: null,
         status: SpecialDrinkStatus.DRAFT,
       },
+      include: { materializedDrink: { select: { id: true } } },
     });
     return mapSpecialDrink(updated);
   }
@@ -142,12 +150,15 @@ export class SpecialDrinksService {
   async softDelete(ownerUserId: string, drinkId: string) {
     await this.assertOwnerCanManageSpecialDrinks(ownerUserId);
     const drink = await this.requireOwnedDrink(ownerUserId, drinkId);
-    await this.prisma.barSpecialDrink.update({
-      where: { id: drink.id },
-      data: {
-        deletedAt: new Date(),
-        status: SpecialDrinkStatus.ARCHIVED,
-      },
+    await this.prisma.$transaction(async (tx) => {
+      await deactivateSpecialDrinkMenu(tx, drink.id);
+      await tx.barSpecialDrink.update({
+        where: { id: drink.id },
+        data: {
+          deletedAt: new Date(),
+          status: SpecialDrinkStatus.ARCHIVED,
+        },
+      });
     });
     return { deleted: true };
   }

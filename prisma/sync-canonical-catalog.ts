@@ -66,6 +66,7 @@ async function main() {
   const removed = await prisma.drink.updateMany({
     where: {
       deletedAt: null,
+      sourceSpecialDrinkId: null,
       OR: [
         { legacyId: null },
         { legacyId: { lt: 1 } },

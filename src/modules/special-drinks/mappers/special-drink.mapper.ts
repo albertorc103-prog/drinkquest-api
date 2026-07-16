@@ -27,6 +27,7 @@ export type SpecialDrinkRow = {
     slug: string;
     logoUrl: string | null;
   };
+  materializedDrink?: { id: string } | null;
 };
 
 export function mapSpecialDrink(row: SpecialDrinkRow) {
@@ -45,6 +46,11 @@ export function mapSpecialDrink(row: SpecialDrinkRow) {
     moderatedAt: row.moderatedAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    materializedDrinkId: row.materializedDrink?.id ?? null,
+    qrReady:
+      row.approvalStatus === SpecialDrinkApprovalStatus.APPROVED &&
+      row.status === SpecialDrinkStatus.ACTIVE &&
+      !!row.materializedDrink?.id,
     bar: row.bar
       ? {
           id: row.bar.id,

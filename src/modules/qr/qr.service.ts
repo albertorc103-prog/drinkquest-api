@@ -1,10 +1,14 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { DrinkRarity, QrSessionStatus, Role } from '@prisma/client';
+import {
+  NotificationType,
+  QrSessionStatus,
+  SpecialDrinkApprovalStatus,
+  SpecialDrinkStatus,
+} from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { randomToken, sha256 } from '../../common/utils/crypto.util';
 import { NotificationsService } from '../notifications/notifications.service';
-import { NotificationType } from '@prisma/client';
 import { MissionsService } from '../missions/missions.service';
 import { BarAccessService } from '../subscriptions/bar-access.service';
 
@@ -16,6 +20,10 @@ export interface QrPayloadResponse {
   timestamp: number;
   expiresAt: number;
   token: string;
+  isSpecial?: boolean;
+  specialDrinkId?: string | null;
+  isLimitedEdition?: boolean;
+  venueLabel?: string | null;
 }
 
 @Injectable()
@@ -32,15 +40,21 @@ export class QrService {
 
   async createSession(
     barOwnerId: string,
-    opts: { drinkId?: string; legacyDrinkId?: number },
+    opts: { drinkId?: string; legacyDrinkId?: number; specialDrinkId?: string },
   ): Promise<QrPayloadResponse> {
     const { bar } = await this.barAccess.assertOwnerCanGenerateQr(barOwnerId);
 
-    const drink = opts.drinkId
-      ? await this.prisma.drink.findFirst({ where: { id: opts.drinkId, deletedAt: null } })
-      : await this.prisma.drink.findFirst({ where: { legacyId: opts.legacyDrinkId, deletedAt: null } });
+    let drink =
+      opts.specialDrinkId != null
+        ? await this.resolveSpecialDrink(bar.id, opts.specialDrinkId)
+        : opts.drinkId
+          ? await this.prisma.drink.findFirst({ where: { id: opts.drinkId, deletedAt: null } })
+          : await this.prisma.drink.findFirst({
+              where: { legacyId: opts.legacyDrinkId, deletedAt: null },
+            });
     if (!drink) throw new NotFoundException('Bebida no encontrada');
     const drinkId = drink.id;
+    const isSpecial = !!drink.sourceSpecialDrinkId;
 
     const menuItem = await this.prisma.barMenuItem.findFirst({
       where: { barId: bar.id, drinkId, active: true, deletedAt: null },
@@ -70,6 +84,8 @@ export class QrService {
         barId: bar.id,
         sessionId: session.id,
         drinkId,
+        isSpecial,
+        specialDrinkId: drink.sourceSpecialDrinkId,
       }),
     );
 
@@ -81,7 +97,37 @@ export class QrService {
       timestamp: now,
       expiresAt: expiresAt.getTime(),
       token,
+      isSpecial,
+      specialDrinkId: drink.sourceSpecialDrinkId,
+      isLimitedEdition: isSpecial,
+      venueLabel: isSpecial ? bar.businessName : null,
     };
+  }
+
+  private async resolveSpecialDrink(barId: string, specialDrinkId: string) {
+    const special = await this.prisma.barSpecialDrink.findFirst({
+      where: {
+        id: specialDrinkId,
+        barId,
+        deletedAt: null,
+        approvalStatus: SpecialDrinkApprovalStatus.APPROVED,
+        status: SpecialDrinkStatus.ACTIVE,
+      },
+    });
+    if (!special) {
+      throw new BadRequestException(
+        'Bebida especializada no disponible. Debe estar aprobada y activa.',
+      );
+    }
+    const drink = await this.prisma.drink.findFirst({
+      where: { sourceSpecialDrinkId: special.id, deletedAt: null },
+    });
+    if (!drink) {
+      throw new BadRequestException(
+        'La bebida especializada aún no está lista para QR. Contacta a soporte.',
+      );
+    }
+    return drink;
   }
 
   async redeem(
@@ -168,6 +214,14 @@ export class QrService {
       xpEarned: xp,
       rarity: session.drink.rarity,
       totalXp: result.totalXp,
+      isSpecial: !!session.drink.sourceSpecialDrinkId,
+      specialDrinkId: session.drink.sourceSpecialDrinkId,
+      isLimitedEdition: !!session.drink.sourceSpecialDrinkId,
+      venueLabel: session.drink.sourceSpecialDrinkId
+        ? session.bar.businessName
+        : null,
+      funFact: session.drink.sourceSpecialDrinkId ? session.drink.description : null,
+      recipe: session.drink.sourceSpecialDrinkId ? session.drink.ingredients : null,
     };
   }
 

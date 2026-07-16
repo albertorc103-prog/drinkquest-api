@@ -76,10 +76,37 @@ export class DrinksService {
   }
 
   async unlocks(userId: string) {
-    return this.prisma.userDrinkUnlock.findMany({
+    const rows = await this.prisma.userDrinkUnlock.findMany({
       where: { userId },
       include: { drink: true },
       orderBy: { unlockedAt: 'desc' },
+    });
+
+    const barIds = [
+      ...new Set(rows.map((r) => r.barId).filter((id): id is string => !!id)),
+    ];
+    const bars =
+      barIds.length === 0
+        ? []
+        : await this.prisma.bar.findMany({
+            where: { id: { in: barIds } },
+            select: { id: true, businessName: true, logoUrl: true },
+          });
+    const barById = new Map(bars.map((b) => [b.id, b]));
+
+    return rows.map((row) => {
+      const isSpecial = !!row.drink.sourceSpecialDrinkId;
+      const bar = row.barId ? barById.get(row.barId) : undefined;
+      return {
+        ...row,
+        isSpecial,
+        isLimitedEdition: isSpecial,
+        specialDrinkId: row.drink.sourceSpecialDrinkId,
+        venueLabel: isSpecial ? (bar?.businessName ?? null) : null,
+        venueLogoUrl: isSpecial ? (bar?.logoUrl ?? null) : null,
+        funFact: isSpecial ? row.drink.description : null,
+        recipe: isSpecial ? row.drink.ingredients : null,
+      };
     });
   }
 

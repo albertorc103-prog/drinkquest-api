@@ -86,7 +86,11 @@ export class BarsController {
       return { seeded: false, reason: 'EXPLORER_ADMIN_ASSIGNED', assignedCount: assigned };
     }
     const drinks = await this.prisma.drink.findMany({
-      where: { deletedAt: null },
+      where: {
+        deletedAt: null,
+        legacyId: { gte: 1, lte: 100 },
+        sourceSpecialDrinkId: null,
+      },
       orderBy: { legacyId: 'asc' },
       take: 100,
       select: { id: true },
