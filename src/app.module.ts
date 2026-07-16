@@ -16,6 +16,7 @@ import { MissionsModule } from './modules/missions/missions.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { PromotionsModule } from './modules/promotions/promotions.module';
 import { QrModule } from './modules/qr/qr.module';
+import { SpecialDrinksModule } from './modules/special-drinks/special-drinks.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
 import { UsersModule } from './modules/users/users.module';
 import { AppConfigModule } from './config/config.module';
@@ -58,6 +59,7 @@ import { SocketsModule } from './sockets/sockets.module';
     PromotionsModule,
     NotificationsModule,
     UploadsModule,
+    SpecialDrinksModule,
     SocketsModule,
   ],
   providers: [

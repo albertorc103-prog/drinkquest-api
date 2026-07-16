@@ -86,3 +86,17 @@ export function isExplorerPlan(plan: SubscriptionPlan): boolean {
 export function qrDrinkLimitForPlan(plan: SubscriptionPlan): number | null {
   return isExplorerPlan(plan) ? explorerQrDrinkLimit() : null;
 }
+
+/** Bebidas especializadas del local: Intermedio y Legend. */
+export function specialDrinksEnabledForPlan(plan: SubscriptionPlan): boolean {
+  const normalized = normalizeSubscriptionPlan(plan);
+  return (
+    normalized === SubscriptionPlan.INTERMEDIATE ||
+    normalized === SubscriptionPlan.LEGEND
+  );
+}
+
+/** Tope de bebidas especializadas por bar (no eliminadas). */
+export function specialDrinkLimitForPlan(plan: SubscriptionPlan): number | null {
+  return specialDrinksEnabledForPlan(plan) ? 3 : null;
+}

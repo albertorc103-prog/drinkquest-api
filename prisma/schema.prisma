@@ -140,6 +140,19 @@ enum PromotionAnalyticsEventType {
   QR_SCAN
 }
 
+enum SpecialDrinkApprovalStatus {
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  FLAGGED
+}
+
+enum SpecialDrinkStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
 model User {
   id                String            @id @default(uuid()) @db.Uuid
   email             String            @unique
@@ -259,15 +272,44 @@ model Bar {
   updatedAt    DateTime @updatedAt @map("updated_at")
   deletedAt    DateTime? @map("deleted_at")
 
-  owner        User              @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
-  menuItems    BarMenuItem[]
-  qrSessions   QrSession[]
-  subscription BarSubscription?
-  promotions   BarPromotion[]
+  owner         User               @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  menuItems     BarMenuItem[]
+  qrSessions    QrSession[]
+  subscription  BarSubscription?
+  promotions    BarPromotion[]
+  specialDrinks BarSpecialDrink[]
 
   @@index([slug])
   @@index([deletedAt])
   @@map("bars")
+}
+
+/// Bebida especializada del local (plan Intermedio/Legend). Máx. 3, rareza COMMON, revisión admin.
+model BarSpecialDrink {
+  id                 String                     @id @default(uuid()) @db.Uuid
+  barId              String                     @map("bar_id") @db.Uuid
+  name               String
+  recipe             String
+  funFact            String                     @map("fun_fact")
+  imageUrl           String                     @map("image_url")
+  rarity             DrinkRarity                @default(COMMON)
+  isLimitedEdition   Boolean                    @default(true) @map("is_limited_edition")
+  status             SpecialDrinkStatus         @default(DRAFT)
+  approvalStatus     SpecialDrinkApprovalStatus @default(PENDING_REVIEW) @map("approval_status")
+  rejectionReason    String?                    @map("rejection_reason")
+  moderatedByAdminId String?                    @map("moderated_by_admin_id") @db.Uuid
+  moderatedAt        DateTime?                  @map("moderated_at")
+  createdAt          DateTime                   @default(now()) @map("created_at")
+  updatedAt          DateTime                   @updatedAt @map("updated_at")
+  deletedAt          DateTime?                  @map("deleted_at")
+
+  bar Bar @relation(fields: [barId], references: [id], onDelete: Cascade)
+
+  @@index([barId])
+  @@index([approvalStatus])
+  @@index([status])
+  @@index([deletedAt])
+  @@map("bar_special_drinks")
 }
 
 /// Promoción publicada por un local (visible en feed USER si acceso SaaS válido).
