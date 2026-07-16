@@ -17,7 +17,9 @@ import { PrismaService } from '../../database/prisma.service';
 import { BarAccessService } from '../subscriptions/bar-access.service';
 import {
   activePromotionLimitForPlan,
+  legendPromoPriorityBoost,
   normalizeSubscriptionPlan,
+  promoPriorityEnabledForPlan,
   thematicEventsEnabledForPlan,
 } from '../subscriptions/subscription-plan.util';
 import { PromotionAnalyticsService } from './promotion-analytics.service';
@@ -62,8 +64,12 @@ export class PromotionService {
     const eventTheme = dto.eventTheme ?? PromotionEventTheme.STANDARD;
     this.assertCanUseEventTheme(plan, eventTheme);
 
-    const placementType = dto.placementType ?? PromotionPlacementType.STANDARD;
-    const priority = dto.priority ?? 0;
+    const { placementType, priority } = this.resolvePlacementAndPriority(
+      plan,
+      dto.placementType,
+      dto.priority,
+      /* isCreate */ true,
+    );
 
     const insertData = {
       barId: bar.id,
@@ -138,8 +144,12 @@ export class PromotionService {
     const eventTheme = dto.eventTheme ?? promo.eventTheme;
     this.assertCanUseEventTheme(plan, eventTheme);
 
-    const placementType = dto.placementType ?? promo.placementType;
-    const priority = dto.priority ?? promo.priority;
+    const { placementType, priority } = this.resolvePlacementAndPriority(
+      plan,
+      dto.placementType ?? promo.placementType,
+      dto.priority ?? promo.priority,
+      /* isCreate */ false,
+    );
 
     const updated = await this.prisma.barPromotion.update({
       where: { id: promotionId },
@@ -149,9 +159,9 @@ export class PromotionService {
         imageUrl: dto.imageUrl,
         startsAt: dto.startsAt ? startsAt : undefined,
         endsAt: dto.endsAt ? endsAt : undefined,
-        placementType: dto.placementType,
+        placementType,
         eventTheme: dto.eventTheme,
-        priority: dto.priority,
+        priority,
         rejectionReason: null,
         moderatedByAdminId: null,
         moderatedAt: null,
@@ -192,6 +202,45 @@ export class PromotionService {
         'Los eventos temáticos (Navidad, Año Nuevo, Halloween, Noche mexicana, aniversario) son exclusivos del plan Legend.',
       );
     }
+  }
+
+  /**
+   * Legend: FEATURED + boost de prioridad por defecto.
+   * Otros planes: solo STANDARD (FEATURED/BOOSTED rechazados).
+   */
+  private resolvePlacementAndPriority(
+    plan: ReturnType<typeof normalizeSubscriptionPlan>,
+    requestedPlacement: PromotionPlacementType | undefined | null,
+    requestedPriority: number | undefined | null,
+    isCreate: boolean,
+  ): { placementType: PromotionPlacementType; priority: number } {
+    const canFeature = promoPriorityEnabledForPlan(plan);
+    let placementType =
+      requestedPlacement ??
+      (isCreate && canFeature
+        ? PromotionPlacementType.FEATURED
+        : PromotionPlacementType.STANDARD);
+
+    if (
+      !canFeature &&
+      (placementType === PromotionPlacementType.FEATURED ||
+        placementType === PromotionPlacementType.BOOSTED)
+    ) {
+      throw new ForbiddenException(
+        'Las promociones destacadas (FEATURED/BOOSTED) son exclusivas del plan Legend.',
+      );
+    }
+
+    if (canFeature && isCreate && requestedPlacement == null) {
+      placementType = PromotionPlacementType.FEATURED;
+    }
+
+    let priority = requestedPriority ?? 0;
+    if (canFeature && isCreate && (requestedPriority == null || requestedPriority === 0)) {
+      priority = legendPromoPriorityBoost();
+    }
+
+    return { placementType, priority };
   }
 
   async activatePromotion(ownerUserId: string, promotionId: string): Promise<PromotionResponseDto> {

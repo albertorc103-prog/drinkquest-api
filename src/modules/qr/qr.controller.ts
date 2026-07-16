@@ -58,7 +58,19 @@ export class QrController {
   @ApiOperation({ summary: 'Bar: estadísticas' })
   async analytics(@CurrentUser() user: JwtPayload) {
     const bar = await this.bars.getByOwner(user.sub);
-    if (!bar) return { unlocksToday: 0, mostPopularDrink: '—', uniqueUsers: 0, totalScans: 0 };
+    if (!bar) {
+      return {
+        unlocksToday: 0,
+        mostPopularDrink: '—',
+        uniqueUsers: 0,
+        totalScans: 0,
+        weeklyActivity: Array.from({ length: 7 }, () => 0),
+        topDrinks: [],
+        peakHours: Array.from({ length: 24 }, () => 0),
+        newUsers: 0,
+        returningUsers: 0,
+      };
+    }
     return this.qr.analytics(bar.id);
   }
 }

@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
 import { evaluateSubscriptionActive } from '../subscriptions/bar-access.rules';
-import { normalizeSubscriptionPlan } from '../subscriptions/subscription-plan.util';
+import {
+  featuredMapBoostForPlan,
+  normalizeSubscriptionPlan,
+} from '../subscriptions/subscription-plan.util';
 
 export interface FeaturedBarsQuery {
   latitude?: number;
@@ -54,6 +57,8 @@ export class BarMapService {
     const items = bars
       .filter((bar) => evaluateSubscriptionActive(bar.subscription, now).allowed)
       .map((bar) => {
+        const plan = normalizeSubscriptionPlan(bar.subscription?.plan);
+        const legendBoost = featuredMapBoostForPlan(plan);
         const distanceKm =
           hasOrigin && bar.latitude != null && bar.longitude != null
             ? haversineKm(query.latitude!, query.longitude!, bar.latitude, bar.longitude)
@@ -69,8 +74,9 @@ export class BarMapService {
           longitude: bar.longitude as number,
           logoUrl: bar.logoUrl,
           bannerUrl: bar.bannerUrl,
-          plan: normalizeSubscriptionPlan(bar.subscription?.plan),
+          plan,
           featured: true,
+          legendBoost,
           distanceKm,
         };
       })
@@ -79,7 +85,12 @@ export class BarMapService {
           ? bar.distanceKm <= query.radiusKm
           : true,
       )
-      .sort((a, b) => (a.distanceKm ?? Number.MAX_SAFE_INTEGER) - (b.distanceKm ?? Number.MAX_SAFE_INTEGER));
+      .sort((a, b) => {
+        if (a.legendBoost !== b.legendBoost) {
+          return a.legendBoost ? -1 : 1;
+        }
+        return (a.distanceKm ?? Number.MAX_SAFE_INTEGER) - (b.distanceKm ?? Number.MAX_SAFE_INTEGER);
+      });
 
     return { items, total: items.length };
   }

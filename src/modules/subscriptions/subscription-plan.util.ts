@@ -172,3 +172,23 @@ export function reservationsEnabledForPlan(plan: SubscriptionPlan): boolean {
 export function globalEventsEnabledForPlan(plan: SubscriptionPlan): boolean {
   return normalizeSubscriptionPlan(plan) === SubscriptionPlan.LEGEND;
 }
+
+/** Preferencia / FEATURED en promociones Happy Hour: solo Legend. */
+export function promoPriorityEnabledForPlan(plan: SubscriptionPlan): boolean {
+  return normalizeSubscriptionPlan(plan) === SubscriptionPlan.LEGEND;
+}
+
+/** Prioridad base añadida al ranking de promos Legend. */
+export function legendPromoPriorityBoost(): number {
+  return 50;
+}
+
+/** Boost en mapa del consumidor (ordenar Legend primero): solo Legend. */
+export function featuredMapBoostForPlan(plan: SubscriptionPlan): boolean {
+  return normalizeSubscriptionPlan(plan) === SubscriptionPlan.LEGEND;
+}
+
+/** Dashboard con gráficas avanzadas: solo Legend. */
+export function advancedAnalyticsEnabledForPlan(plan: SubscriptionPlan): boolean {
+  return normalizeSubscriptionPlan(plan) === SubscriptionPlan.LEGEND;
+}

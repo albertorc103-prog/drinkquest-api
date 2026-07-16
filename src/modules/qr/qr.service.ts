@@ -252,22 +252,63 @@ export class QrService {
   async analytics(barId: string) {
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
+
     const used = await this.prisma.qrSession.findMany({
       where: { barId, status: QrSessionStatus.USED },
       include: { drink: true },
+      orderBy: { usedAt: 'asc' },
     });
+
     const today = used.filter((s) => s.usedAt && s.usedAt >= startOfDay);
     const counts = new Map<string, number>();
     for (const s of used) {
       counts.set(s.drink.name, (counts.get(s.drink.name) ?? 0) + 1);
     }
-    const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+    const topEntries = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+    const top = topEntries[0];
     const uniqueUsers = new Set(used.map((s) => s.scannedById).filter(Boolean)).size;
+
+    const dayKey = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const todayKey = dayKey(new Date());
+
+    const weeklyActivity = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date();
+      d.setHours(0, 0, 0, 0);
+      d.setDate(d.getDate() - (6 - i));
+      const key = dayKey(d);
+      return used.filter((s) => s.usedAt && dayKey(s.usedAt) === key).length;
+    });
+
+    const peakHours = Array.from({ length: 24 }, () => 0);
+    for (const s of used) {
+      if (!s.usedAt) continue;
+      peakHours[s.usedAt.getHours()] += 1;
+    }
+
+    const firstSeen = new Map<string, Date>();
+    for (const s of used) {
+      const uid = s.scannedById;
+      if (!uid || !s.usedAt) continue;
+      const prev = firstSeen.get(uid);
+      if (!prev || s.usedAt < prev) firstSeen.set(uid, s.usedAt);
+    }
+    let newUsers = 0;
+    for (const firstAt of firstSeen.values()) {
+      if (dayKey(firstAt) === todayKey) newUsers += 1;
+    }
+    const returningUsers = Math.max(0, uniqueUsers - newUsers);
+
     return {
       unlocksToday: today.length,
       mostPopularDrink: top?.[0] ?? '—',
       uniqueUsers,
       totalScans: used.length,
+      weeklyActivity,
+      topDrinks: topEntries.slice(0, 8).map(([name, count]) => ({ name, count })),
+      peakHours,
+      newUsers,
+      returningUsers,
     };
   }
 
