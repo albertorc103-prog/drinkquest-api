@@ -80,6 +80,12 @@ enum NotificationType {
   PROMOTION_REJECTED
   PROMOTION_FLAGGED
   PROMOTION_PUBLISHED
+  ROOFTOP_VERIFIED
+  ROOFTOP_REJECTED
+  ROOFTOP_PACKAGE_APPROVED
+  ROOFTOP_PACKAGE_REJECTED
+  ROOFTOP_PACKAGE_FLAGGED
+  ROOFTOP_PACKAGE_PUBLISHED
 }
 
 /// Ciclo de vida de la suscripción SaaS del local (manual o Stripe en fases futuras).
@@ -134,6 +140,27 @@ enum PromotionEventTheme {
   HALLOWEEN
   NOCHE_MEXICANA
   ANNIVERSARY
+}
+
+/// Verificación admin de terraza/jardín (Legend → sección Rooftop).
+enum RooftopVerificationStatus {
+  NONE
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum RooftopPackageStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum RooftopPackageApprovalStatus {
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  FLAGGED
 }
 
 enum PromotionApprovalStatus {
@@ -301,6 +328,12 @@ model Bar {
   longitude    Float?
   isVerified   Boolean  @default(false) @map("is_verified")
   isActive     Boolean  @default(true) @map("is_active")
+  /// El bar declara terraza o jardín (Legend).
+  hasOutdoorSpace Boolean @default(false) @map("has_outdoor_space")
+  rooftopStatus RooftopVerificationStatus @default(NONE) @map("rooftop_status")
+  rooftopRejectionReason String? @map("rooftop_rejection_reason")
+  rooftopReviewedAt DateTime? @map("rooftop_reviewed_at")
+  rooftopReviewedByAdminId String? @map("rooftop_reviewed_by_admin_id") @db.Uuid
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
   deletedAt    DateTime? @map("deleted_at")
@@ -313,9 +346,11 @@ model Bar {
   specialDrinks   BarSpecialDrink[]
   missionSeasons  BarMissionSeason[]
   userBarMedals   UserBarMedal[]
+  rooftopPackages BarRooftopPackage[]
 
   @@index([slug])
   @@index([deletedAt])
+  @@index([rooftopStatus])
   @@map("bars")
 }
 
@@ -346,6 +381,37 @@ model BarSpecialDrink {
   @@index([status])
   @@index([deletedAt])
   @@map("bar_special_drinks")
+}
+
+/// Paquete Rooftop (comida + bebidas). Solo si admin aprobó terraza/jardín del bar Legend.
+model BarRooftopPackage {
+  id                 String                       @id @default(uuid()) @db.Uuid
+  barId              String                       @map("bar_id") @db.Uuid
+  title              String
+  description        String?
+  imageUrl           String                       @map("image_url")
+  includesFood       Boolean                      @default(true) @map("includes_food")
+  includesDrinks     Boolean                      @default(true) @map("includes_drinks")
+  priceLabel         String?                      @map("price_label")
+  startsAt           DateTime                     @map("starts_at")
+  endsAt             DateTime                     @map("ends_at")
+  status             RooftopPackageStatus         @default(DRAFT)
+  approvalStatus     RooftopPackageApprovalStatus @default(PENDING_REVIEW) @map("approval_status")
+  rejectionReason    String?                      @map("rejection_reason")
+  moderatedByAdminId String?                      @map("moderated_by_admin_id") @db.Uuid
+  moderatedAt        DateTime?                    @map("moderated_at")
+  createdAt          DateTime                     @default(now()) @map("created_at")
+  updatedAt          DateTime                     @updatedAt @map("updated_at")
+  deletedAt          DateTime?                    @map("deleted_at")
+
+  bar Bar @relation(fields: [barId], references: [id], onDelete: Cascade)
+
+  @@index([barId])
+  @@index([status])
+  @@index([approvalStatus])
+  @@index([startsAt, endsAt])
+  @@index([deletedAt])
+  @@map("bar_rooftop_packages")
 }
 
 /// Temporada de 3 misiones del local (Legend) → 1 medalla del bar.

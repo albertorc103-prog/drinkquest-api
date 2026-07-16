@@ -157,3 +157,8 @@ export function barMissionsEnabledForPlan(plan: SubscriptionPlan): boolean {
 export function thematicEventsEnabledForPlan(plan: SubscriptionPlan): boolean {
   return normalizeSubscriptionPlan(plan) === SubscriptionPlan.LEGEND;
 }
+
+/** Rooftop (terraza/jardín + paquetes): solo Legend. */
+export function rooftopEnabledForPlan(plan: SubscriptionPlan): boolean {
+  return normalizeSubscriptionPlan(plan) === SubscriptionPlan.LEGEND;
+}

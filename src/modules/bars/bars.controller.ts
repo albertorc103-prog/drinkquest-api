@@ -54,7 +54,7 @@ export class BarsController {
   }
 
   @Patch('me')
-  update(@CurrentUser() user: JwtPayload, @Body() body: Record<string, string>) {
+  update(@CurrentUser() user: JwtPayload, @Body() body: Record<string, unknown>) {
     return this.bars.updateProfile(user.sub, body);
   }
 

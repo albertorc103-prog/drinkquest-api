@@ -15,6 +15,9 @@ export type AdminBarRecord = {
   city: string | null;
   logoUrl: string | null;
   bannerUrl: string | null;
+  hasOutdoorSpace?: boolean;
+  rooftopStatus?: string;
+  rooftopRejectionReason?: string | null;
   owner: { email: string; displayName: string } | null;
   subscription: AdminBarSubscriptionSlice | null;
 };
@@ -42,6 +45,9 @@ export function mapAdminBarRow(bar: AdminBarRecord) {
     city: bar.city,
     logoUrl: bar.logoUrl,
     bannerUrl: bar.bannerUrl,
+    hasOutdoorSpace: bar.hasOutdoorSpace ?? false,
+    rooftopStatus: bar.rooftopStatus ?? 'NONE',
+    rooftopRejectionReason: bar.rooftopRejectionReason ?? null,
     owner: bar.owner,
     subscription,
     status: subscription?.status ?? null,
