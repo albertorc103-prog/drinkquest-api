@@ -31,6 +31,7 @@ export function mapPromotion(
     status: promo.status,
     priority: promo.priority,
     placementType: promo.placementType,
+    eventTheme: promo.eventTheme,
     approvalStatus: promo.approvalStatus,
     rejectionReason: promo.rejectionReason,
     moderatedByAdminId: promo.moderatedByAdminId,

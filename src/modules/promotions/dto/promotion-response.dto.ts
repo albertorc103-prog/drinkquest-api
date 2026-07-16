@@ -1,5 +1,6 @@
 import {
   PromotionApprovalStatus,
+  PromotionEventTheme,
   PromotionPlacementType,
   PromotionStatus,
 } from '@prisma/client';
@@ -29,6 +30,7 @@ export interface PromotionResponseDto {
   status: PromotionStatus;
   priority: number;
   placementType: PromotionPlacementType;
+  eventTheme: PromotionEventTheme;
   approvalStatus: PromotionApprovalStatus;
   rejectionReason: string | null;
   moderatedByAdminId: string | null;

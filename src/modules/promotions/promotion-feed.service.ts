@@ -1,11 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, PromotionEventTheme } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { PromotionFeedPageDto } from './dto/promotion-response.dto';
 import { mapPromotion } from './mappers/promotion.mapper';
 import { buildClientPromotionFeedWhere } from './utils/promotion-client-feed.util';
 
 export type PromotionFeedSort = 'ranking' | 'ending_soon' | 'newest';
+export type PromotionFeedThemeFilter = 'ALL' | 'THEMED' | PromotionEventTheme;
 
 @Injectable()
 export class PromotionFeedService {
@@ -17,11 +18,14 @@ export class PromotionFeedService {
     page = 1,
     limit = 20,
     sort: PromotionFeedSort = 'ranking',
+    theme: PromotionFeedThemeFilter = 'ALL',
   ): Promise<PromotionFeedPageDto> {
     const now = new Date();
     const safeLimit = Math.min(Math.max(limit, 1), 50);
     const skip = (Math.max(page, 1) - 1) * safeLimit;
-    const where = buildClientPromotionFeedWhere(now);
+    const where: Prisma.BarPromotionWhereInput = {
+      AND: [buildClientPromotionFeedWhere(now), this.themeWhere(theme)],
+    };
     const orderBy = this.resolveOrderBy(sort);
 
     const [rows, total] = await Promise.all([
@@ -44,6 +48,7 @@ export class PromotionFeedService {
         event: 'promotion_feed_list',
         page: Math.max(page, 1),
         limit: safeLimit,
+        theme,
         total,
         returned: rows.length,
       }),
@@ -57,6 +62,17 @@ export class PromotionFeedService {
     };
   }
 
+  private themeWhere(theme: PromotionFeedThemeFilter): Prisma.BarPromotionWhereInput {
+    if (theme === 'ALL') return {};
+    if (theme === 'THEMED') {
+      return { eventTheme: { not: PromotionEventTheme.STANDARD } };
+    }
+    if (Object.values(PromotionEventTheme).includes(theme)) {
+      return { eventTheme: theme };
+    }
+    return {};
+  }
+
   private resolveOrderBy(sort: PromotionFeedSort): Prisma.BarPromotionOrderByWithRelationInput[] {
     switch (sort) {
       case 'ending_soon':
@@ -66,6 +82,7 @@ export class PromotionFeedService {
       case 'ranking':
       default:
         return [
+          { eventTheme: 'desc' },
           { placementType: 'desc' },
           { rankingScore: 'desc' },
           { priority: 'desc' },

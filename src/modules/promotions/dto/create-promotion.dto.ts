@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { PromotionPlacementType } from '@prisma/client';
+import { PromotionEventTheme, PromotionPlacementType } from '@prisma/client';
 import {
   IsDateString,
   IsEnum,
@@ -43,6 +43,16 @@ export class CreatePromotionDto {
   @IsOptional()
   @IsEnum(PromotionPlacementType)
   placementType?: PromotionPlacementType;
+
+  @ApiPropertyOptional({
+    enum: PromotionEventTheme,
+    default: PromotionEventTheme.STANDARD,
+    description:
+      'Temática de evento Happy Hour. Distinto de STANDARD solo en plan Legend (Navidad, Año Nuevo, etc.).',
+  })
+  @IsOptional()
+  @IsEnum(PromotionEventTheme)
+  eventTheme?: PromotionEventTheme;
 
   @ApiPropertyOptional({ default: 0 })
   @IsOptional()

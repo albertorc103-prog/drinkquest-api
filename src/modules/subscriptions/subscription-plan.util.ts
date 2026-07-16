@@ -152,3 +152,8 @@ export function specialDrinkXpForRarity(rarity: DrinkRarity): number {
 export function barMissionsEnabledForPlan(plan: SubscriptionPlan): boolean {
   return normalizeSubscriptionPlan(plan) === SubscriptionPlan.LEGEND;
 }
+
+/** Eventos temáticos Happy Hour (Navidad, aniversario, etc.): solo Legend. */
+export function thematicEventsEnabledForPlan(plan: SubscriptionPlan): boolean {
+  return normalizeSubscriptionPlan(plan) === SubscriptionPlan.LEGEND;
+}

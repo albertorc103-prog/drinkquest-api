@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { PromotionPlacementType } from '@prisma/client';
+import { PromotionEventTheme, PromotionPlacementType } from '@prisma/client';
 import {
   IsDateString,
   IsEnum,
@@ -46,6 +46,11 @@ export class UpdatePromotionDto {
   @IsOptional()
   @IsEnum(PromotionPlacementType)
   placementType?: PromotionPlacementType;
+
+  @ApiPropertyOptional({ enum: PromotionEventTheme })
+  @IsOptional()
+  @IsEnum(PromotionEventTheme)
+  eventTheme?: PromotionEventTheme;
 
   @ApiPropertyOptional()
   @IsOptional()

@@ -1,8 +1,15 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   Prisma,
   PromotionEventType,
   PromotionApprovalStatus,
+  PromotionEventTheme,
   PromotionPlacementType,
   PromotionStatus,
 } from '@prisma/client';
@@ -11,6 +18,7 @@ import { BarAccessService } from '../subscriptions/bar-access.service';
 import {
   activePromotionLimitForPlan,
   normalizeSubscriptionPlan,
+  thematicEventsEnabledForPlan,
 } from '../subscriptions/subscription-plan.util';
 import { PromotionAnalyticsService } from './promotion-analytics.service';
 import { CreatePromotionDto } from './dto/create-promotion.dto';
@@ -18,7 +26,10 @@ import { PromotionResponseDto } from './dto/promotion-response.dto';
 import { UpdatePromotionDto } from './dto/update-promotion.dto';
 import { mapPromotion } from './mappers/promotion.mapper';
 import { assertNotAlreadyExpired, assertValidPromotionWindow } from './utils/promotion-dates.util';
-import { computePromotionRankingScore } from './utils/promotion-ranking.util';
+import {
+  computePromotionRankingScore,
+  isThematicEventTheme,
+} from './utils/promotion-ranking.util';
 
 @Injectable()
 export class PromotionService {
@@ -41,11 +52,15 @@ export class PromotionService {
   }
 
   async createPromotion(ownerUserId: string, dto: CreatePromotionDto): Promise<PromotionResponseDto> {
-    const { bar } = await this.barAccess.assertOwnerCanUsePromotions(ownerUserId);
+    const { bar, subscription } = await this.barAccess.assertOwnerCanUsePromotions(ownerUserId);
     const startsAt = new Date(dto.startsAt);
     const endsAt = new Date(dto.endsAt);
     assertValidPromotionWindow(startsAt, endsAt);
     assertNotAlreadyExpired(endsAt);
+
+    const plan = normalizeSubscriptionPlan(subscription?.plan);
+    const eventTheme = dto.eventTheme ?? PromotionEventTheme.STANDARD;
+    this.assertCanUseEventTheme(plan, eventTheme);
 
     const placementType = dto.placementType ?? PromotionPlacementType.STANDARD;
     const priority = dto.priority ?? 0;
@@ -59,9 +74,10 @@ export class PromotionService {
       endsAt,
       status: PromotionStatus.DRAFT,
       placementType,
+      eventTheme,
       priority,
       approvalStatus: PromotionApprovalStatus.PENDING_REVIEW,
-      rankingScore: computePromotionRankingScore(priority, placementType),
+      rankingScore: computePromotionRankingScore(priority, placementType, eventTheme),
     };
 
     this.logger.log(
@@ -91,6 +107,7 @@ export class PromotionService {
         barId: created.barId,
         status: created.status,
         approvalStatus: created.approvalStatus,
+        eventTheme: created.eventTheme,
         imageUrl: created.imageUrl,
         startsAt: created.startsAt.toISOString(),
         endsAt: created.endsAt.toISOString(),
@@ -105,6 +122,7 @@ export class PromotionService {
     promotionId: string,
     dto: UpdatePromotionDto,
   ): Promise<PromotionResponseDto> {
+    const { subscription } = await this.barAccess.assertOwnerCanUsePromotions(ownerUserId);
     const promo = await this.requireOwnedPromotion(ownerUserId, promotionId);
     if (promo.status === PromotionStatus.EXPIRED) {
       throw new BadRequestException('No se puede editar una promoción expirada.');
@@ -115,6 +133,10 @@ export class PromotionService {
     if (dto.startsAt || dto.endsAt) {
       assertValidPromotionWindow(startsAt, endsAt);
     }
+
+    const plan = normalizeSubscriptionPlan(subscription?.plan);
+    const eventTheme = dto.eventTheme ?? promo.eventTheme;
+    this.assertCanUseEventTheme(plan, eventTheme);
 
     const placementType = dto.placementType ?? promo.placementType;
     const priority = dto.priority ?? promo.priority;
@@ -128,6 +150,7 @@ export class PromotionService {
         startsAt: dto.startsAt ? startsAt : undefined,
         endsAt: dto.endsAt ? endsAt : undefined,
         placementType: dto.placementType,
+        eventTheme: dto.eventTheme,
         priority: dto.priority,
         rejectionReason: null,
         moderatedByAdminId: null,
@@ -137,7 +160,7 @@ export class PromotionService {
           promo.approvalStatus === PromotionApprovalStatus.FLAGGED
             ? PromotionApprovalStatus.PENDING_REVIEW
             : undefined,
-        rankingScore: computePromotionRankingScore(priority, placementType),
+        rankingScore: computePromotionRankingScore(priority, placementType, eventTheme),
       },
     });
     if (
@@ -154,9 +177,21 @@ export class PromotionService {
         ownerUserId,
         promotionId: updated.id,
         barId: updated.barId,
+        eventTheme: updated.eventTheme,
       }),
     );
     return mapPromotion(updated);
+  }
+
+  private assertCanUseEventTheme(
+    plan: ReturnType<typeof normalizeSubscriptionPlan>,
+    eventTheme: PromotionEventTheme,
+  ) {
+    if (isThematicEventTheme(eventTheme) && !thematicEventsEnabledForPlan(plan)) {
+      throw new ForbiddenException(
+        'Los eventos temáticos (Navidad, Año Nuevo, Halloween, Noche mexicana, aniversario) son exclusivos del plan Legend.',
+      );
+    }
   }
 
   async activatePromotion(ownerUserId: string, promotionId: string): Promise<PromotionResponseDto> {

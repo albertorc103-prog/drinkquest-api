@@ -126,6 +126,16 @@ enum PromotionPlacementType {
   BOOSTED
 }
 
+/// Temática de evento Happy Hour (Legend). STANDARD = promo normal.
+enum PromotionEventTheme {
+  STANDARD
+  CHRISTMAS
+  NEW_YEAR
+  HALLOWEEN
+  NOCHE_MEXICANA
+  ANNIVERSARY
+}
+
 enum PromotionApprovalStatus {
   PENDING_REVIEW
   APPROVED
@@ -429,6 +439,7 @@ model BarPromotion {
   status         PromotionStatus          @default(DRAFT)
   priority       Int                      @default(0)
   placementType  PromotionPlacementType   @default(STANDARD) @map("placement_type")
+  eventTheme     PromotionEventTheme      @default(STANDARD) @map("event_theme")
   approvalStatus PromotionApprovalStatus  @default(PENDING_REVIEW) @map("approval_status")
   rejectionReason String?                 @map("rejection_reason")
   moderatedByAdminId String?              @map("moderated_by_admin_id") @db.Uuid
@@ -446,6 +457,7 @@ model BarPromotion {
   @@index([startsAt])
   @@index([endsAt])
   @@index([placementType])
+  @@index([eventTheme])
   @@index([approvalStatus])
   @@index([moderatedByAdminId])
   @@index([rankingScore])

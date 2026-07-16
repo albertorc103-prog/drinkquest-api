@@ -1,9 +1,27 @@
-import { PromotionPlacementType } from '@prisma/client';
+import { PromotionEventTheme, PromotionPlacementType } from '@prisma/client';
 
-/** Score base para orden del feed (featured / boosted / priority). Stripe boosts en fases futuras. */
+const THEME_LABELS: Record<PromotionEventTheme, string> = {
+  [PromotionEventTheme.STANDARD]: 'Promoción',
+  [PromotionEventTheme.CHRISTMAS]: 'Navidad',
+  [PromotionEventTheme.NEW_YEAR]: 'Año Nuevo',
+  [PromotionEventTheme.HALLOWEEN]: 'Halloween',
+  [PromotionEventTheme.NOCHE_MEXICANA]: 'Noche mexicana',
+  [PromotionEventTheme.ANNIVERSARY]: 'Aniversario',
+};
+
+export function promotionEventThemeLabel(theme: PromotionEventTheme): string {
+  return THEME_LABELS[theme] ?? 'Promoción';
+}
+
+export function isThematicEventTheme(theme: PromotionEventTheme): boolean {
+  return theme !== PromotionEventTheme.STANDARD;
+}
+
+/** Score base para orden del feed (featured / boosted / priority / temática Legend). */
 export function computePromotionRankingScore(
   priority: number,
   placementType: PromotionPlacementType,
+  eventTheme: PromotionEventTheme = PromotionEventTheme.STANDARD,
 ): number {
   const placementBoost =
     placementType === PromotionPlacementType.BOOSTED
@@ -11,5 +29,6 @@ export function computePromotionRankingScore(
       : placementType === PromotionPlacementType.FEATURED
         ? 100
         : 0;
-  return priority + placementBoost;
+  const themeBoost = isThematicEventTheme(eventTheme) ? 75 : 0;
+  return priority + placementBoost + themeBoost;
 }
