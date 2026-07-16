@@ -29,6 +29,13 @@ export const BAR_MISSION_TEMPLATES: Record<BarMissionTemplate, BarMissionTemplat
       description: 'Desbloquea dos bebidas distintas en este bar.',
       targetCount: 2,
     },
+    [BarMissionTemplate.RESERVE_PARTY_OF_TWO]: {
+      template: BarMissionTemplate.RESERVE_PARTY_OF_TWO,
+      title: 'Mesa para dos',
+      description:
+        'Reserva una mesa para al menos 2 personas en este bar (sin depósito). El local debe confirmarla.',
+      targetCount: 1,
+    },
   };
 
 /** Palabras/frases prohibidas en títulos personalizados de temporada/medalla. */

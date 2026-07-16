@@ -285,7 +285,7 @@ export class BarMissionsService {
     };
   }
 
-  /** Tras canje QR: actualiza progreso de misiones activas del bar. */
+  /** Tras canje QR: actualiza progreso de misiones SCAN_* activas del bar. */
   async onQrUnlock(userId: string, barId: string) {
     const now = new Date();
     const season = await this.prisma.barMissionSeason.findFirst({
@@ -311,7 +311,8 @@ export class BarMissionsService {
     });
 
     for (const mission of season.missions) {
-      const value = this.computeProgress(mission.template, unlocks);
+      if (mission.template === BarMissionTemplate.RESERVE_PARTY_OF_TWO) continue;
+      const value = this.computeScanProgress(mission.template, unlocks);
       const completed = value >= mission.targetCount;
       await this.prisma.userBarMissionProgress.upsert({
         where: {
@@ -331,6 +332,50 @@ export class BarMissionsService {
     }
 
     await this.maybeUnlockMedal(userId, season.id, barId, season.missions.length);
+  }
+
+  /** Tras confirmar reserva: progreso de misiones RESERVE_PARTY_OF_TWO. */
+  async onReservationConfirmed(userId: string, barId: string, partySize: number) {
+    if (partySize < 2) return;
+    const now = new Date();
+    const season = await this.prisma.barMissionSeason.findFirst({
+      where: {
+        barId,
+        deletedAt: null,
+        status: BarMissionSeasonStatus.ACTIVE,
+        startsAt: { lte: now },
+        endsAt: { gte: now },
+      },
+      include: {
+        missions: {
+          where: { template: BarMissionTemplate.RESERVE_PARTY_OF_TWO },
+        },
+      },
+    });
+    if (!season || season.missions.length === 0) return;
+
+    for (const mission of season.missions) {
+      await this.prisma.userBarMissionProgress.upsert({
+        where: {
+          userId_missionId: { userId, missionId: mission.id },
+        },
+        create: {
+          userId,
+          missionId: mission.id,
+          progress: mission.targetCount,
+          completedAt: now,
+        },
+        update: {
+          progress: mission.targetCount,
+          completedAt: now,
+        },
+      });
+    }
+
+    const allMissions = await this.prisma.barMission.count({
+      where: { seasonId: season.id },
+    });
+    await this.maybeUnlockMedal(userId, season.id, barId, allMissions);
   }
 
   private async maybeUnlockMedal(
@@ -372,7 +417,7 @@ export class BarMissionsService {
     );
   }
 
-  private computeProgress(
+  private computeScanProgress(
     template: BarMissionTemplate,
     unlocks: { drinkId: string; unlockedAt: Date }[],
   ): number {

@@ -162,3 +162,8 @@ export function thematicEventsEnabledForPlan(plan: SubscriptionPlan): boolean {
 export function rooftopEnabledForPlan(plan: SubscriptionPlan): boolean {
   return normalizeSubscriptionPlan(plan) === SubscriptionPlan.LEGEND;
 }
+
+/** Reservas de mesa (nombre, personas, fecha; sin depósito): solo Legend. */
+export function reservationsEnabledForPlan(plan: SubscriptionPlan): boolean {
+  return normalizeSubscriptionPlan(plan) === SubscriptionPlan.LEGEND;
+}

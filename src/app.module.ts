@@ -19,6 +19,7 @@ import { PromotionsModule } from './modules/promotions/promotions.module';
 import { QrModule } from './modules/qr/qr.module';
 import { SpecialDrinksModule } from './modules/special-drinks/special-drinks.module';
 import { RooftopModule } from './modules/rooftop/rooftop.module';
+import { ReservationsModule } from './modules/reservations/reservations.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
 import { UsersModule } from './modules/users/users.module';
 import { AppConfigModule } from './config/config.module';
@@ -64,6 +65,7 @@ import { SocketsModule } from './sockets/sockets.module';
     SpecialDrinksModule,
     BarMissionsModule,
     RooftopModule,
+    ReservationsModule,
     SocketsModule,
   ],
   providers: [

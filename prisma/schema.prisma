@@ -86,6 +86,10 @@ enum NotificationType {
   ROOFTOP_PACKAGE_REJECTED
   ROOFTOP_PACKAGE_FLAGGED
   ROOFTOP_PACKAGE_PUBLISHED
+  RESERVATION_CREATED
+  RESERVATION_CONFIRMED
+  RESERVATION_DECLINED
+  RESERVATION_CANCELLED
 }
 
 /// Ciclo de vida de la suscripción SaaS del local (manual o Stripe en fases futuras).
@@ -203,12 +207,23 @@ enum BarMissionTemplate {
   SCAN_ONCE
   SCAN_TWO_DAYS
   SCAN_TWO_DRINKS
+  /// Reservar mesa para al menos 2 personas (sin depósito).
+  RESERVE_PARTY_OF_TWO
 }
 
 enum BarMissionSeasonStatus {
   DRAFT
   ACTIVE
   ENDED
+}
+
+/// Reserva de mesa (Legend). Solo nombre, personas y fecha — sin depósito.
+enum BarReservationStatus {
+  PENDING
+  CONFIRMED
+  DECLINED
+  CANCELLED
+  COMPLETED
 }
 
 model User {
@@ -255,6 +270,7 @@ model User {
   userAchievements    UserAchievement[]
   userBarMissionProgress UserBarMissionProgress[]
   userBarMedals       UserBarMedal[]
+  barReservations     BarReservation[]
   posts               FeedPost[]
   postLikes           PostLike[]
   postComments        PostComment[]
@@ -347,11 +363,36 @@ model Bar {
   missionSeasons  BarMissionSeason[]
   userBarMedals   UserBarMedal[]
   rooftopPackages BarRooftopPackage[]
+  reservations    BarReservation[]
 
   @@index([slug])
   @@index([deletedAt])
   @@index([rooftopStatus])
   @@map("bars")
+}
+
+/// Reserva de mesa en un bar Legend. Sin depósito.
+model BarReservation {
+  id           String              @id @default(uuid()) @db.Uuid
+  barId        String              @map("bar_id") @db.Uuid
+  userId       String              @map("user_id") @db.Uuid
+  guestName    String              @map("guest_name")
+  partySize    Int                 @map("party_size")
+  reservedFor  DateTime            @map("reserved_for")
+  notes        String?
+  status       BarReservationStatus @default(PENDING)
+  barResponse  String?             @map("bar_response")
+  createdAt    DateTime            @default(now()) @map("created_at")
+  updatedAt    DateTime            @updatedAt @map("updated_at")
+  resolvedAt   DateTime?           @map("resolved_at")
+
+  bar  Bar  @relation(fields: [barId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([barId, status])
+  @@index([userId, status])
+  @@index([reservedFor])
+  @@map("bar_reservations")
 }
 
 /// Bebida especializada del local (Intermedio: 3 COMMON; Legend: 5C/3R/2E/1L). Revisión admin.
