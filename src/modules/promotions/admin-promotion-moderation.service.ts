@@ -1,10 +1,12 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
+  NotificationType,
   PromotionApprovalStatus,
   PromotionEventType,
   PromotionStatus,
 } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PromotionResponseDto } from './dto/promotion-response.dto';
 import { mapPromotion } from './mappers/promotion.mapper';
 import {
@@ -19,7 +21,10 @@ import {
 export class AdminPromotionModerationService {
   private readonly logger = new Logger(AdminPromotionModerationService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   async inspectFeedEligibility(promotionId: string) {
     const now = new Date();
@@ -164,6 +169,22 @@ export class AdminPromotionModerationService {
       }),
     );
 
+    await this.notifications.notifyBarOwner(
+      promo.barId,
+      NotificationType.PROMOTION_APPROVED,
+      'Promoción aprobada',
+      `"${updated.title}" ya puede verse en Promos.`,
+      { promotionId: updated.id, barId: promo.barId },
+    );
+    if (passesFeedFilter) {
+      await this.notifications.notifyAllUsers(
+        NotificationType.PROMOTION_PUBLISHED,
+        'Nueva promoción',
+        `${updated.bar.businessName} publicó "${updated.title}" en Promos.`,
+        { promotionId: updated.id, barId: promo.barId, category: 'promotions' },
+      );
+    }
+
     return mapPromotion(updated);
   }
 
@@ -191,6 +212,15 @@ export class AdminPromotionModerationService {
         adminId,
       }),
     );
+
+    await this.notifications.notifyBarOwner(
+      promo.barId,
+      NotificationType.PROMOTION_REJECTED,
+      'Promoción rechazada',
+      `"${updated.title}": ${reason.trim()}`,
+      { promotionId: updated.id, barId: promo.barId, reason: reason.trim() },
+    );
+
     return mapPromotion(updated);
   }
 
@@ -218,6 +248,15 @@ export class AdminPromotionModerationService {
         adminId,
       }),
     );
+
+    await this.notifications.notifyBarOwner(
+      promo.barId,
+      NotificationType.PROMOTION_FLAGGED,
+      'Promoción marcada',
+      `"${updated.title}" requiere revisión: ${reason.trim()}`,
+      { promotionId: updated.id, barId: promo.barId, reason: reason.trim() },
+    );
+
     return mapPromotion(updated);
   }
 

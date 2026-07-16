@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { AdminSpecialDrinksController } from './admin-special-drinks.controller';
 import { AdminSpecialDrinksService } from './admin-special-drinks.service';
@@ -8,7 +9,7 @@ import { SpecialDrinksFeedService } from './special-drinks-feed.service';
 import { SpecialDrinksService } from './special-drinks.service';
 
 @Module({
-  imports: [SubscriptionsModule],
+  imports: [SubscriptionsModule, NotificationsModule],
   controllers: [
     BarSpecialDrinksController,
     AdminSpecialDrinksController,

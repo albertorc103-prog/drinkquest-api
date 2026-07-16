@@ -220,6 +220,15 @@ export class QrService {
       venueLabel: session.drink.sourceSpecialDrinkId
         ? session.bar.businessName
         : null,
+      venueLogoUrl: session.drink.sourceSpecialDrinkId
+        ? (session.bar.logoUrl ?? null)
+        : null,
+      venueBannerUrl: session.drink.sourceSpecialDrinkId
+        ? (session.bar.bannerUrl ?? null)
+        : null,
+      venueImageUrl: session.drink.sourceSpecialDrinkId
+        ? (session.bar.bannerUrl ?? session.bar.logoUrl ?? null)
+        : null,
       funFact: session.drink.sourceSpecialDrinkId ? session.drink.description : null,
       recipe: session.drink.sourceSpecialDrinkId ? session.drink.ingredients : null,
     };

@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -22,6 +22,11 @@ export class NotificationsController {
     return this.notifications.unreadCount(user.sub);
   }
 
+  @Get('unread-by-category')
+  unreadByCategory(@CurrentUser() user: JwtPayload) {
+    return this.notifications.unreadByCategory(user.sub);
+  }
+
   @Patch(':id/read')
   markRead(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.notifications.markRead(user.sub, id);
@@ -30,5 +35,15 @@ export class NotificationsController {
   @Post('read-all')
   markAllRead(@CurrentUser() user: JwtPayload) {
     return this.notifications.markAllRead(user.sub);
+  }
+
+  @Post('read-category')
+  markCategoryRead(
+    @CurrentUser() user: JwtPayload,
+    @Body() body: { category?: string },
+  ) {
+    const raw = String(body?.category ?? '').toLowerCase();
+    const category = raw === 'promotions' || raw === 'promos' ? 'promotions' : 'cocktails';
+    return this.notifications.markCategoryRead(user.sub, category);
   }
 }

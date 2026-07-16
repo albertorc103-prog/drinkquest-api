@@ -90,20 +90,26 @@ export class DrinksService {
         ? []
         : await this.prisma.bar.findMany({
             where: { id: { in: barIds } },
-            select: { id: true, businessName: true, logoUrl: true },
+            select: { id: true, businessName: true, logoUrl: true, bannerUrl: true },
           });
     const barById = new Map(bars.map((b) => [b.id, b]));
 
     return rows.map((row) => {
       const isSpecial = !!row.drink.sourceSpecialDrinkId;
       const bar = row.barId ? barById.get(row.barId) : undefined;
+      const venueLogoUrl = isSpecial ? (bar?.logoUrl ?? null) : null;
+      const venueBannerUrl = isSpecial ? (bar?.bannerUrl ?? null) : null;
       return {
         ...row,
         isSpecial,
         isLimitedEdition: isSpecial,
         specialDrinkId: row.drink.sourceSpecialDrinkId,
         venueLabel: isSpecial ? (bar?.businessName ?? null) : null,
-        venueLogoUrl: isSpecial ? (bar?.logoUrl ?? null) : null,
+        venueLogoUrl,
+        venueBannerUrl,
+        venueImageUrl: isSpecial
+          ? (venueBannerUrl ?? venueLogoUrl)
+          : null,
         funFact: isSpecial ? row.drink.description : null,
         recipe: isSpecial ? row.drink.ingredients : null,
       };

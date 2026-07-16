@@ -1,6 +1,11 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { SpecialDrinkApprovalStatus, SpecialDrinkStatus } from '@prisma/client';
+import {
+  NotificationType,
+  SpecialDrinkApprovalStatus,
+  SpecialDrinkStatus,
+} from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { mapSpecialDrink } from './mappers/special-drink.mapper';
 import {
   deactivateSpecialDrinkMenu,
@@ -9,7 +14,10 @@ import {
 
 @Injectable()
 export class AdminSpecialDrinksService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   async listPending(limit = 100) {
     const rows = await this.prisma.barSpecialDrink.findMany({
@@ -57,12 +65,37 @@ export class AdminSpecialDrinksService {
         where: { id: row.id },
         include: {
           bar: {
-            select: { id: true, businessName: true, slug: true, logoUrl: true },
+            select: {
+              id: true,
+              businessName: true,
+              slug: true,
+              logoUrl: true,
+              ownerUserId: true,
+            },
           },
           materializedDrink: { select: { id: true } },
         },
       });
     });
+
+    const barName = updated.bar.businessName;
+    await this.notifications.notifyBarOwner(
+      updated.barId,
+      NotificationType.SPECIAL_DRINK_APPROVED,
+      'Cóctel de autor aprobado',
+      `"${updated.name}" ya está listo para QR y aparecerá en Cócteles.`,
+      { specialDrinkId: updated.id, barId: updated.barId },
+    );
+    await this.notifications.notifyAllUsers(
+      NotificationType.SPECIAL_DRINK_PUBLISHED,
+      'Nuevo cóctel de autor',
+      `${barName} publicó "${updated.name}" en Cócteles.`,
+      {
+        specialDrinkId: updated.id,
+        barId: updated.barId,
+        category: 'cocktails',
+      },
+    );
 
     return mapSpecialDrink(updated);
   }
@@ -88,6 +121,15 @@ export class AdminSpecialDrinksService {
         },
       });
     });
+
+    await this.notifications.notifyBarOwner(
+      updated.barId,
+      NotificationType.SPECIAL_DRINK_REJECTED,
+      'Cóctel de autor rechazado',
+      `"${updated.name}": ${reason.trim()}`,
+      { specialDrinkId: updated.id, barId: updated.barId, reason: reason.trim() },
+    );
+
     return mapSpecialDrink(updated);
   }
 
@@ -115,6 +157,15 @@ export class AdminSpecialDrinksService {
         },
       });
     });
+
+    await this.notifications.notifyBarOwner(
+      updated.barId,
+      NotificationType.SPECIAL_DRINK_FLAGGED,
+      'Cóctel de autor marcado',
+      `"${updated.name}" requiere revisión: ${reason.trim()}`,
+      { specialDrinkId: updated.id, barId: updated.barId, reason: reason.trim() },
+    );
+
     return mapSpecialDrink(updated);
   }
 
