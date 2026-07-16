@@ -6,6 +6,7 @@ import { GlobalExceptionFilter } from './common/filters/global-exception.filter'
 import { RequestLoggingInterceptor } from './common/interceptors/request-logging.interceptor';
 import { AdminModule } from './modules/admin/admin.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { BarMissionsModule } from './modules/bar-missions/bar-missions.module';
 import { BarsModule } from './modules/bars/bars.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { ChatModule } from './modules/chat/chat.module';
@@ -60,6 +61,7 @@ import { SocketsModule } from './sockets/sockets.module';
     NotificationsModule,
     UploadsModule,
     SpecialDrinksModule,
+    BarMissionsModule,
     SocketsModule,
   ],
   providers: [

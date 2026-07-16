@@ -10,6 +10,7 @@ import { PrismaService } from '../../database/prisma.service';
 import { randomToken, sha256 } from '../../common/utils/crypto.util';
 import { NotificationsService } from '../notifications/notifications.service';
 import { MissionsService } from '../missions/missions.service';
+import { BarMissionsService } from '../bar-missions/bar-missions.service';
 import { BarAccessService } from '../subscriptions/bar-access.service';
 
 export interface QrPayloadResponse {
@@ -35,6 +36,7 @@ export class QrService {
     private readonly config: ConfigService,
     private readonly notifications: NotificationsService,
     private readonly missions: MissionsService,
+    private readonly barMissions: BarMissionsService,
     private readonly barAccess: BarAccessService,
   ) {}
 
@@ -187,6 +189,7 @@ export class QrService {
     });
 
     await this.missions.onQrUnlock(userId);
+    await this.barMissions.onQrUnlock(userId, session.barId);
     await this.notifications.create(
       userId,
       NotificationType.QR_UNLOCK,

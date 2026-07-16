@@ -1,5 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { DrinkRarity } from '@prisma/client';
+import {
+  IsEnum,
+  IsOptional,
+  IsString,
+  Matches,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 
 export class CreateSpecialDrinkDto {
   @ApiProperty({ example: 'Negroni de la casa' })
@@ -25,6 +33,16 @@ export class CreateSpecialDrinkDto {
   @MaxLength(2048)
   @Matches(/^https?:\/\/.+/i, { message: 'imageUrl debe ser una URL http(s) válida' })
   imageUrl!: string;
+
+  @ApiPropertyOptional({
+    enum: DrinkRarity,
+    description:
+      'Rareza solicitada. Intermedio solo COMMON. Legend: cupos 5C / 3R / 2E / 1L.',
+    default: DrinkRarity.COMMON,
+  })
+  @IsOptional()
+  @IsEnum(DrinkRarity)
+  rarity?: DrinkRarity;
 }
 
 export class UpdateSpecialDrinkDto {
@@ -55,4 +73,9 @@ export class UpdateSpecialDrinkDto {
   @MaxLength(2048)
   @Matches(/^https?:\/\/.+/i, { message: 'imageUrl debe ser una URL http(s) válida' })
   imageUrl?: string;
+
+  @ApiPropertyOptional({ enum: DrinkRarity })
+  @IsOptional()
+  @IsEnum(DrinkRarity)
+  rarity?: DrinkRarity;
 }

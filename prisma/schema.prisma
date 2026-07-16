@@ -161,6 +161,19 @@ enum SpecialDrinkStatus {
   ARCHIVED
 }
 
+/// Plantillas sanas de misiones del local (Legend). Sin consumo excesivo.
+enum BarMissionTemplate {
+  SCAN_ONCE
+  SCAN_TWO_DAYS
+  SCAN_TWO_DRINKS
+}
+
+enum BarMissionSeasonStatus {
+  DRAFT
+  ACTIVE
+  ENDED
+}
+
 model User {
   id                String            @id @default(uuid()) @db.Uuid
   email             String            @unique
@@ -203,6 +216,8 @@ model User {
   favoriteDrinks      UserFavoriteDrink[]
   userMissions        UserMission[]
   userAchievements    UserAchievement[]
+  userBarMissionProgress UserBarMissionProgress[]
+  userBarMedals       UserBarMedal[]
   posts               FeedPost[]
   postLikes           PostLike[]
   postComments        PostComment[]
@@ -285,14 +300,16 @@ model Bar {
   qrSessions    QrSession[]
   subscription  BarSubscription?
   promotions    BarPromotion[]
-  specialDrinks BarSpecialDrink[]
+  specialDrinks   BarSpecialDrink[]
+  missionSeasons  BarMissionSeason[]
+  userBarMedals   UserBarMedal[]
 
   @@index([slug])
   @@index([deletedAt])
   @@map("bars")
 }
 
-/// Bebida especializada del local (plan Intermedio/Legend). Máx. 3, rareza COMMON, revisión admin.
+/// Bebida especializada del local (Intermedio: 3 COMMON; Legend: 5C/3R/2E/1L). Revisión admin.
 model BarSpecialDrink {
   id                 String                     @id @default(uuid()) @db.Uuid
   barId              String                     @map("bar_id") @db.Uuid
@@ -319,6 +336,85 @@ model BarSpecialDrink {
   @@index([status])
   @@index([deletedAt])
   @@map("bar_special_drinks")
+}
+
+/// Temporada de 3 misiones del local (Legend) → 1 medalla del bar.
+model BarMissionSeason {
+  id               String                 @id @default(uuid()) @db.Uuid
+  barId            String                 @map("bar_id") @db.Uuid
+  title            String
+  startsAt         DateTime               @map("starts_at")
+  endsAt           DateTime               @map("ends_at")
+  status           BarMissionSeasonStatus @default(DRAFT)
+  medalTitle       String                 @map("medal_title")
+  medalDescription String                 @map("medal_description")
+  createdAt        DateTime               @default(now()) @map("created_at")
+  updatedAt        DateTime               @updatedAt @map("updated_at")
+  deletedAt        DateTime?              @map("deleted_at")
+
+  bar          Bar              @relation(fields: [barId], references: [id], onDelete: Cascade)
+  missions     BarMission[]
+  medalUnlocks UserBarMedal[]
+
+  @@index([barId])
+  @@index([status])
+  @@index([startsAt, endsAt])
+  @@index([deletedAt])
+  @@map("bar_mission_seasons")
+}
+
+model BarMission {
+  id          String            @id @default(uuid()) @db.Uuid
+  seasonId    String            @map("season_id") @db.Uuid
+  template    BarMissionTemplate
+  title       String
+  description String
+  targetCount Int               @default(1) @map("target_count")
+  sortOrder   Int               @default(0) @map("sort_order")
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+
+  season    BarMissionSeason         @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  progress  UserBarMissionProgress[]
+
+  @@index([seasonId])
+  @@map("bar_missions")
+}
+
+model UserBarMissionProgress {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  missionId   String    @map("mission_id") @db.Uuid
+  progress    Int       @default(0)
+  completedAt DateTime? @map("completed_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  user    User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mission BarMission @relation(fields: [missionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, missionId])
+  @@index([userId])
+  @@map("user_bar_mission_progress")
+}
+
+/// Una medalla por temporada del local (Legend).
+model UserBarMedal {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  barId      String   @map("bar_id") @db.Uuid
+  seasonId   String   @map("season_id") @db.Uuid
+  unlockedAt DateTime @default(now()) @map("unlocked_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bar    Bar              @relation(fields: [barId], references: [id], onDelete: Cascade)
+  season BarMissionSeason @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, seasonId])
+  @@index([userId])
+  @@index([barId])
+  @@map("user_bar_medals")
 }
 
 /// Promoción publicada por un local (visible en feed USER si acceso SaaS válido).

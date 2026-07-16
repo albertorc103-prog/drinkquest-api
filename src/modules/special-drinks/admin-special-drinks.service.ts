@@ -59,6 +59,7 @@ export class AdminSpecialDrinksService {
         recipe: row.recipe,
         funFact: row.funFact,
         imageUrl: row.imageUrl,
+        rarity: row.rarity,
       });
 
       return tx.barSpecialDrink.findUniqueOrThrow({

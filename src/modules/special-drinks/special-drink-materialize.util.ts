@@ -1,5 +1,6 @@
 import { DrinkRarity, Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
+import { specialDrinkXpForRarity } from '../subscriptions/subscription-plan.util';
 
 type SpecialDrinkSource = {
   id: string;
@@ -8,6 +9,7 @@ type SpecialDrinkSource = {
   recipe: string;
   funFact: string;
   imageUrl: string;
+  rarity: DrinkRarity;
 };
 
 type Tx = Prisma.TransactionClient | PrismaService;
@@ -32,6 +34,8 @@ export async function ensureCocktailsCategoryId(db: Tx): Promise<string> {
 export async function materializeSpecialDrink(db: Tx, special: SpecialDrinkSource) {
   const categoryId = await ensureCocktailsCategoryId(db);
   const slug = `special-${special.id}`;
+  const rarity = special.rarity ?? DrinkRarity.COMMON;
+  const xpReward = specialDrinkXpForRarity(rarity);
 
   const existing = await db.drink.findFirst({
     where: { sourceSpecialDrinkId: special.id },
@@ -45,8 +49,8 @@ export async function materializeSpecialDrink(db: Tx, special: SpecialDrinkSourc
           imageUrl: special.imageUrl,
           description: special.funFact.trim(),
           ingredients: special.recipe.trim(),
-          rarity: DrinkRarity.COMMON,
-          xpReward: 10,
+          rarity,
+          xpReward,
           categoryId,
           originBarId: special.barId,
           deletedAt: null,
@@ -59,11 +63,11 @@ export async function materializeSpecialDrink(db: Tx, special: SpecialDrinkSourc
           slug,
           name: special.name.trim(),
           categoryId,
-          rarity: DrinkRarity.COMMON,
+          rarity,
           imageUrl: special.imageUrl,
           description: special.funFact.trim(),
           ingredients: special.recipe.trim(),
-          xpReward: 10,
+          xpReward,
           legacyId: null,
           sourceSpecialDrinkId: special.id,
           originBarId: special.barId,

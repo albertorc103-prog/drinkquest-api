@@ -1,4 +1,7 @@
-import { SubscriptionPlan } from '@prisma/client';
+import { DrinkRarity, SubscriptionPlan } from '@prisma/client';
+
+/** Cupos de bebidas especializadas por rareza (0 = no permitido). */
+export type SpecialDrinkRarityQuotas = Record<DrinkRarity, number>;
 
 /** Planes aceptados en API (incluye alias legacy BASIC/PRO). */
 export const SUBSCRIPTION_PLAN_INPUTS = [
@@ -96,7 +99,56 @@ export function specialDrinksEnabledForPlan(plan: SubscriptionPlan): boolean {
   );
 }
 
-/** Tope de bebidas especializadas por bar (no eliminadas). */
+/**
+ * Cupos por rareza:
+ * - Intermedio: 3 comunes (resto 0)
+ * - Legend: 5 comunes, 3 raras, 2 épicas, 1 legendaria
+ */
+export function specialDrinkQuotasForPlan(
+  plan: SubscriptionPlan,
+): SpecialDrinkRarityQuotas | null {
+  switch (normalizeSubscriptionPlan(plan)) {
+    case SubscriptionPlan.INTERMEDIATE:
+      return {
+        [DrinkRarity.COMMON]: 3,
+        [DrinkRarity.RARE]: 0,
+        [DrinkRarity.EPIC]: 0,
+        [DrinkRarity.LEGENDARY]: 0,
+      };
+    case SubscriptionPlan.LEGEND:
+      return {
+        [DrinkRarity.COMMON]: 5,
+        [DrinkRarity.RARE]: 3,
+        [DrinkRarity.EPIC]: 2,
+        [DrinkRarity.LEGENDARY]: 1,
+      };
+    default:
+      return null;
+  }
+}
+
+/** Suma de cupos (tope total de slots no eliminados). */
 export function specialDrinkLimitForPlan(plan: SubscriptionPlan): number | null {
-  return specialDrinksEnabledForPlan(plan) ? 3 : null;
+  const quotas = specialDrinkQuotasForPlan(plan);
+  if (!quotas) return null;
+  return Object.values(quotas).reduce((sum, n) => sum + n, 0);
+}
+
+export function specialDrinkXpForRarity(rarity: DrinkRarity): number {
+  switch (rarity) {
+    case DrinkRarity.RARE:
+      return 25;
+    case DrinkRarity.EPIC:
+      return 50;
+    case DrinkRarity.LEGENDARY:
+      return 100;
+    case DrinkRarity.COMMON:
+    default:
+      return 10;
+  }
+}
+
+/** Temporada de misiones + medalla del local: solo Legend. */
+export function barMissionsEnabledForPlan(plan: SubscriptionPlan): boolean {
+  return normalizeSubscriptionPlan(plan) === SubscriptionPlan.LEGEND;
 }

@@ -8,17 +8,27 @@ import {
   DrinkRarity,
   SpecialDrinkApprovalStatus,
   SpecialDrinkStatus,
+  SubscriptionPlan,
 } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { BarAccessService } from '../subscriptions/bar-access.service';
 import {
   normalizeSubscriptionPlan,
   specialDrinkLimitForPlan,
+  specialDrinkQuotasForPlan,
   specialDrinksEnabledForPlan,
+  type SpecialDrinkRarityQuotas,
 } from '../subscriptions/subscription-plan.util';
 import { CreateSpecialDrinkDto, UpdateSpecialDrinkDto } from './dto/special-drink.dto';
 import { mapSpecialDrink } from './mappers/special-drink.mapper';
 import { deactivateSpecialDrinkMenu } from './special-drink-materialize.util';
+
+const RARITY_LABEL: Record<DrinkRarity, string> = {
+  [DrinkRarity.COMMON]: 'común',
+  [DrinkRarity.RARE]: 'rara',
+  [DrinkRarity.EPIC]: 'épica',
+  [DrinkRarity.LEGENDARY]: 'legendaria',
+};
 
 @Injectable()
 export class SpecialDrinksService {
@@ -28,30 +38,34 @@ export class SpecialDrinksService {
   ) {}
 
   async listForOwner(ownerUserId: string) {
-    const { bar } = await this.assertOwnerCanManageSpecialDrinks(ownerUserId);
+    const { bar, plan } = await this.assertOwnerCanManageSpecialDrinks(ownerUserId);
     const rows = await this.prisma.barSpecialDrink.findMany({
       where: { barId: bar.id, deletedAt: null },
       include: { materializedDrink: { select: { id: true } } },
       orderBy: { createdAt: 'desc' },
     });
-    const limit = specialDrinkLimitForPlan(
-      normalizeSubscriptionPlan(
-        (await this.prisma.barSubscription.findUnique({ where: { barId: bar.id } }))?.plan,
-      ),
-    );
+    const quotas = specialDrinkQuotasForPlan(plan)!;
+    const limit = specialDrinkLimitForPlan(plan)!;
+    const usedByRarity = this.countByRarity(rows.map((r) => r.rarity));
     return {
       items: rows.map(mapSpecialDrink),
       limit,
       used: rows.length,
+      plan,
+      quotas: this.mapQuotaUsage(quotas, usedByRarity),
     };
   }
 
   async create(ownerUserId: string, dto: CreateSpecialDrinkDto) {
     const { bar, plan } = await this.assertOwnerCanManageSpecialDrinks(ownerUserId);
+    const quotas = specialDrinkQuotasForPlan(plan);
     const limit = specialDrinkLimitForPlan(plan);
-    if (limit == null) {
+    if (!quotas || limit == null) {
       throw new ForbiddenException('Tu plan no incluye bebidas especializadas.');
     }
+
+    const rarity = this.resolveRarityForPlan(plan, dto.rarity);
+    await this.assertCanOccupyRaritySlot(bar.id, quotas, rarity);
 
     const used = await this.prisma.barSpecialDrink.count({
       where: { barId: bar.id, deletedAt: null },
@@ -69,7 +83,7 @@ export class SpecialDrinksService {
         recipe: dto.recipe.trim(),
         funFact: dto.funFact.trim(),
         imageUrl: dto.imageUrl.trim(),
-        rarity: DrinkRarity.COMMON,
+        rarity,
         isLimitedEdition: true,
         status: SpecialDrinkStatus.DRAFT,
         approvalStatus: SpecialDrinkApprovalStatus.PENDING_REVIEW,
@@ -79,15 +93,28 @@ export class SpecialDrinksService {
   }
 
   /**
-   * Edición limitada: si ya estaba aprobada/rechazada/marcada, vuelve a revisión.
-   * Rareza siempre COMMON; no se puede cambiar.
+   * Edición: si ya estaba aprobada/rechazada/marcada, vuelve a revisión.
+   * Legend puede cambiar rareza dentro de cupos; Intermedio fuerza COMMON.
    */
   async update(ownerUserId: string, drinkId: string, dto: UpdateSpecialDrinkDto) {
-    await this.assertOwnerCanManageSpecialDrinks(ownerUserId);
+    const { plan } = await this.assertOwnerCanManageSpecialDrinks(ownerUserId);
     const drink = await this.requireOwnedDrink(ownerUserId, drinkId);
+    const quotas = specialDrinkQuotasForPlan(plan);
+    if (!quotas) {
+      throw new ForbiddenException('Tu plan no incluye bebidas especializadas.');
+    }
 
     if (drink.status === SpecialDrinkStatus.ARCHIVED) {
       throw new BadRequestException('No se puede editar una bebida archivada.');
+    }
+
+    const nextRarity =
+      dto.rarity !== undefined
+        ? this.resolveRarityForPlan(plan, dto.rarity)
+        : this.resolveRarityForPlan(plan, drink.rarity);
+
+    if (nextRarity !== drink.rarity) {
+      await this.assertCanOccupyRaritySlot(drink.barId, quotas, nextRarity, drink.id);
     }
 
     const needsReReview =
@@ -106,7 +133,7 @@ export class SpecialDrinksService {
         recipe: dto.recipe?.trim(),
         funFact: dto.funFact?.trim(),
         imageUrl: dto.imageUrl?.trim(),
-        rarity: DrinkRarity.COMMON,
+        rarity: nextRarity,
         isLimitedEdition: true,
         ...(needsReReview
           ? {
@@ -163,6 +190,77 @@ export class SpecialDrinksService {
     return { deleted: true };
   }
 
+  private resolveRarityForPlan(
+    plan: SubscriptionPlan,
+    requested?: DrinkRarity | null,
+  ): DrinkRarity {
+    const rarity = requested ?? DrinkRarity.COMMON;
+    if (plan === SubscriptionPlan.INTERMEDIATE && rarity !== DrinkRarity.COMMON) {
+      throw new BadRequestException(
+        'El plan Intermedio solo permite bebidas especializadas de rareza común.',
+      );
+    }
+    const quotas = specialDrinkQuotasForPlan(plan);
+    if (!quotas || (quotas[rarity] ?? 0) <= 0) {
+      throw new BadRequestException(
+        `Tu plan no permite bebidas de rareza ${RARITY_LABEL[rarity]}.`,
+      );
+    }
+    return rarity;
+  }
+
+  private async assertCanOccupyRaritySlot(
+    barId: string,
+    quotas: SpecialDrinkRarityQuotas,
+    rarity: DrinkRarity,
+    excludeId?: string,
+  ) {
+    const max = quotas[rarity] ?? 0;
+    if (max <= 0) {
+      throw new BadRequestException(
+        `Tu plan no permite bebidas de rareza ${RARITY_LABEL[rarity]}.`,
+      );
+    }
+    const used = await this.prisma.barSpecialDrink.count({
+      where: {
+        barId,
+        deletedAt: null,
+        rarity,
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+      },
+    });
+    if (used >= max) {
+      throw new BadRequestException(
+        `Cupo agotado: máximo ${max} bebida(s) ${RARITY_LABEL[rarity]}. Elimina o cambia otra.`,
+      );
+    }
+  }
+
+  private countByRarity(rarities: DrinkRarity[]): SpecialDrinkRarityQuotas {
+    const counts: SpecialDrinkRarityQuotas = {
+      [DrinkRarity.COMMON]: 0,
+      [DrinkRarity.RARE]: 0,
+      [DrinkRarity.EPIC]: 0,
+      [DrinkRarity.LEGENDARY]: 0,
+    };
+    for (const r of rarities) {
+      counts[r] = (counts[r] ?? 0) + 1;
+    }
+    return counts;
+  }
+
+  private mapQuotaUsage(
+    limits: SpecialDrinkRarityQuotas,
+    used: SpecialDrinkRarityQuotas,
+  ) {
+    return {
+      COMMON: { limit: limits.COMMON, used: used.COMMON },
+      RARE: { limit: limits.RARE, used: used.RARE },
+      EPIC: { limit: limits.EPIC, used: used.EPIC },
+      LEGENDARY: { limit: limits.LEGENDARY, used: used.LEGENDARY },
+    };
+  }
+
   private async assertOwnerCanManageSpecialDrinks(ownerUserId: string) {
     const ctx = await this.barAccess.resolveByOwnerUserId(ownerUserId);
     if (!this.barAccess.isSubscriptionActive(ctx)) {
@@ -173,7 +271,7 @@ export class SpecialDrinksService {
     const plan = normalizeSubscriptionPlan(ctx.subscription?.plan);
     if (!specialDrinksEnabledForPlan(plan)) {
       throw new ForbiddenException(
-        'Las bebidas especializadas están exclusivas de los planes Intermedio y Legend.',
+        'Las bebidas especializadas son exclusivas de los planes Intermedio y Legend.',
       );
     }
     return { bar: ctx.bar, plan };
