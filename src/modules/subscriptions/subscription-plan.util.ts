@@ -167,3 +167,8 @@ export function rooftopEnabledForPlan(plan: SubscriptionPlan): boolean {
 export function reservationsEnabledForPlan(plan: SubscriptionPlan): boolean {
   return normalizeSubscriptionPlan(plan) === SubscriptionPlan.LEGEND;
 }
+
+/** Participación en eventos globales DrinkQuest: solo Legend. */
+export function globalEventsEnabledForPlan(plan: SubscriptionPlan): boolean {
+  return normalizeSubscriptionPlan(plan) === SubscriptionPlan.LEGEND;
+}

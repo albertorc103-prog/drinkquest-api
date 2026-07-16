@@ -90,6 +90,8 @@ enum NotificationType {
   RESERVATION_CONFIRMED
   RESERVATION_DECLINED
   RESERVATION_CANCELLED
+  GLOBAL_EVENT_PROGRESS
+  GLOBAL_EVENT_COMPLETED
 }
 
 /// Ciclo de vida de la suscripción SaaS del local (manual o Stripe en fases futuras).
@@ -226,6 +228,18 @@ enum BarReservationStatus {
   COMPLETED
 }
 
+/// Eventos globales gestionados por DrinkQuest (solo bares Legend en el pool).
+enum GlobalEventStatus {
+  DRAFT
+  ACTIVE
+  ENDED
+}
+
+enum GlobalEventGoalType {
+  /// Desbloquear bebida (QR) en N bares distintos del pool Legend.
+  VISIT_BARS
+}
+
 model User {
   id                String            @id @default(uuid()) @db.Uuid
   email             String            @unique
@@ -271,6 +285,8 @@ model User {
   userBarMissionProgress UserBarMissionProgress[]
   userBarMedals       UserBarMedal[]
   barReservations     BarReservation[]
+  globalEventProgress UserGlobalEventProgress[]
+  globalEventMedals   UserGlobalEventMedal[]
   posts               FeedPost[]
   postLikes           PostLike[]
   postComments        PostComment[]
@@ -364,6 +380,7 @@ model Bar {
   userBarMedals   UserBarMedal[]
   rooftopPackages BarRooftopPackage[]
   reservations    BarReservation[]
+  globalEventBars GlobalEventBar[]
 
   @@index([slug])
   @@index([deletedAt])
@@ -393,6 +410,79 @@ model BarReservation {
   @@index([userId, status])
   @@index([reservedFor])
   @@map("bar_reservations")
+}
+
+/// Campaña global DrinkQuest. Solo bares Legend pueden formar el pool.
+model GlobalEvent {
+  id               String             @id @default(uuid()) @db.Uuid
+  title            String
+  description      String
+  imageUrl         String?            @map("image_url")
+  goalType         GlobalEventGoalType @default(VISIT_BARS) @map("goal_type")
+  targetCount      Int                @default(3) @map("target_count")
+  startsAt         DateTime           @map("starts_at")
+  endsAt           DateTime           @map("ends_at")
+  status           GlobalEventStatus  @default(DRAFT)
+  medalTitle       String             @map("medal_title")
+  medalDescription String             @map("medal_description")
+  createdByAdminId String?            @map("created_by_admin_id") @db.Uuid
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+  deletedAt        DateTime?          @map("deleted_at")
+
+  bars     GlobalEventBar[]
+  progress UserGlobalEventProgress[]
+  medals   UserGlobalEventMedal[]
+
+  @@index([status])
+  @@index([startsAt, endsAt])
+  @@index([deletedAt])
+  @@map("global_events")
+}
+
+model GlobalEventBar {
+  id        String   @id @default(uuid()) @db.Uuid
+  eventId   String   @map("event_id") @db.Uuid
+  barId     String   @map("bar_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  event GlobalEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  bar   Bar         @relation(fields: [barId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, barId])
+  @@index([barId])
+  @@map("global_event_bars")
+}
+
+model UserGlobalEventProgress {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  eventId     String    @map("event_id") @db.Uuid
+  progress    Int       @default(0)
+  completedAt DateTime? @map("completed_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  user  User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event GlobalEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, eventId])
+  @@index([eventId])
+  @@map("user_global_event_progress")
+}
+
+model UserGlobalEventMedal {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  eventId    String   @map("event_id") @db.Uuid
+  unlockedAt DateTime @default(now()) @map("unlocked_at")
+
+  user  User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event GlobalEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, eventId])
+  @@index([eventId])
+  @@map("user_global_event_medals")
 }
 
 /// Bebida especializada del local (Intermedio: 3 COMMON; Legend: 5C/3R/2E/1L). Revisión admin.
