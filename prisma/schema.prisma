@@ -204,6 +204,17 @@ enum SpecialDrinkStatus {
   ARCHIVED
 }
 
+enum VenueEventStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum VenueEventModerationStatus {
+  VISIBLE
+  REMOVED
+}
+
 /// Plantillas sanas de misiones del local (Legend). Sin consumo excesivo.
 enum BarMissionTemplate {
   SCAN_ONCE
@@ -379,6 +390,7 @@ model Bar {
   missionSeasons  BarMissionSeason[]
   userBarMedals   UserBarMedal[]
   rooftopPackages BarRooftopPackage[]
+  venueEvents     BarVenueEvent[]
   reservations    BarReservation[]
   globalEventBars GlobalEventBar[]
 
@@ -386,6 +398,36 @@ model Bar {
   @@index([deletedAt])
   @@index([rooftopStatus])
   @@map("bars")
+}
+
+/// Evento publicitario del lugar (Legend). Publicación directa con aceptación de políticas;
+/// el admin puede retirarlo si incumple.
+model BarVenueEvent {
+  id                 String                      @id @default(uuid()) @db.Uuid
+  barId              String                      @map("bar_id") @db.Uuid
+  title              String
+  description        String?
+  imageUrl           String?                     @map("image_url")
+  startsAt           DateTime                    @map("starts_at")
+  endsAt             DateTime                    @map("ends_at")
+  status             VenueEventStatus            @default(DRAFT)
+  moderationStatus   VenueEventModerationStatus  @default(VISIBLE) @map("moderation_status")
+  removalReason      String?                     @map("removal_reason")
+  removedByAdminId   String?                     @map("removed_by_admin_id") @db.Uuid
+  removedAt          DateTime?                   @map("removed_at")
+  policiesAcceptedAt DateTime?                   @map("policies_accepted_at")
+  createdAt          DateTime                    @default(now()) @map("created_at")
+  updatedAt          DateTime                    @updatedAt @map("updated_at")
+  deletedAt          DateTime?                   @map("deleted_at")
+
+  bar Bar @relation(fields: [barId], references: [id], onDelete: Cascade)
+
+  @@index([barId])
+  @@index([status])
+  @@index([moderationStatus])
+  @@index([startsAt, endsAt])
+  @@index([deletedAt])
+  @@map("bar_venue_events")
 }
 
 /// Reserva de mesa en un bar Legend. Sin depósito.

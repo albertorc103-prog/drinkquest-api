@@ -21,6 +21,7 @@ import { SpecialDrinksModule } from './modules/special-drinks/special-drinks.mod
 import { RooftopModule } from './modules/rooftop/rooftop.module';
 import { ReservationsModule } from './modules/reservations/reservations.module';
 import { GlobalEventsModule } from './modules/global-events/global-events.module';
+import { VenueEventsModule } from './modules/venue-events/venue-events.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
 import { UsersModule } from './modules/users/users.module';
 import { AppConfigModule } from './config/config.module';
@@ -68,6 +69,7 @@ import { SocketsModule } from './sockets/sockets.module';
     RooftopModule,
     ReservationsModule,
     GlobalEventsModule,
+    VenueEventsModule,
     SocketsModule,
   ],
   providers: [

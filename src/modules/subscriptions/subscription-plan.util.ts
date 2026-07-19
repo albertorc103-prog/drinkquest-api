@@ -192,3 +192,15 @@ export function featuredMapBoostForPlan(plan: SubscriptionPlan): boolean {
 export function advancedAnalyticsEnabledForPlan(plan: SubscriptionPlan): boolean {
   return normalizeSubscriptionPlan(plan) === SubscriptionPlan.LEGEND;
 }
+
+/** Eventos publicitarios del lugar: solo Legend. */
+export function venueEventsEnabledForPlan(plan: SubscriptionPlan): boolean {
+  return normalizeSubscriptionPlan(plan) === SubscriptionPlan.LEGEND;
+}
+
+/** Texto de políticas que el bar debe aceptar antes de publicar un evento. */
+export const VENUE_EVENT_POLICY_LINES: readonly string[] = [
+  'No publicar retos ni concursos que incentiven embriaguez o abuso del consumo de alcohol.',
+  'No publicar contenido sexual.',
+  'DrinkQuest puede retirar la publicidad si incumple estas políticas.',
+] as const;
