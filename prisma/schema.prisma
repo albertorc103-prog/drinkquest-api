@@ -251,6 +251,18 @@ enum GlobalEventGoalType {
   VISIT_BARS
 }
 
+enum FeedPostType {
+  USER
+  UNLOCK
+  VISIT
+  ACHIEVEMENT
+}
+
+enum MagazineSection {
+  STRONG
+  PARA_DATE
+}
+
 model User {
   id                String            @id @default(uuid()) @db.Uuid
   email             String            @unique
@@ -302,6 +314,7 @@ model User {
   postLikes           PostLike[]
   postComments        PostComment[]
   notifications       Notification[]
+  deviceTokens        DeviceToken[]
   reportsFiled        Report[]              @relation("ReportReporter")
   reportsReceived     Report[]              @relation("ReportTargetUser")
   qrSessionsScanned   QrSession[]           @relation("QrScannedBy")
@@ -393,6 +406,7 @@ model Bar {
   venueEvents     BarVenueEvent[]
   reservations    BarReservation[]
   globalEventBars GlobalEventBar[]
+  magazineEditorials MagazineEditorial[]
 
   @@index([slug])
   @@index([deletedAt])
@@ -834,6 +848,7 @@ model Drink {
   unlocks              UserDrinkUnlock[]
   history              DrinkHistoryEntry[]
   favorites            UserFavoriteDrink[]
+  magazineEditorials   MagazineEditorial[]
 
   @@index([categoryId])
   @@index([rarity])
@@ -1099,15 +1114,17 @@ model MessageRead {
 }
 
 model FeedPost {
-  id         String   @id @default(uuid()) @db.Uuid
-  authorId   String   @map("author_id") @db.Uuid
+  id         String       @id @default(uuid()) @db.Uuid
+  authorId   String       @map("author_id") @db.Uuid
+  type       FeedPostType @default(USER)
   body       String?
-  imageUrl   String?  @map("image_url")
-  imageKey   String?  @map("image_key")
-  shareCount Int      @default(0) @map("share_count")
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
-  deletedAt  DateTime? @map("deleted_at")
+  imageUrl   String?      @map("image_url")
+  imageKey   String?      @map("image_key")
+  meta       Json?
+  shareCount Int          @default(0) @map("share_count")
+  createdAt  DateTime     @default(now()) @map("created_at")
+  updatedAt  DateTime     @updatedAt @map("updated_at")
+  deletedAt  DateTime?    @map("deleted_at")
 
   author   User           @relation(fields: [authorId], references: [id], onDelete: Cascade)
   likes    PostLike[]
@@ -1115,7 +1132,35 @@ model FeedPost {
 
   @@index([createdAt])
   @@index([authorId])
+  @@index([type])
   @@map("feed_posts")
+}
+
+model MagazineEditorial {
+  id           String          @id @default(uuid()) @db.Uuid
+  section      MagazineSection
+  title        String
+  teaser       String
+  category     String          @default("EDITORIAL")
+  imageUrl     String?         @map("image_url")
+  statusBadge  String          @default("EN BARRA") @map("status_badge")
+  etaLabel     String          @default("ESTA SEMANA") @map("eta_label")
+  barId        String?         @map("bar_id") @db.Uuid
+  drinkId      String?         @map("drink_id") @db.Uuid
+  venueNote    String?         @map("venue_note")
+  sortOrder    Int             @default(0) @map("sort_order")
+  published    Boolean         @default(true)
+  publishedAt  DateTime?       @map("published_at")
+  createdAt    DateTime        @default(now()) @map("created_at")
+  updatedAt    DateTime        @updatedAt @map("updated_at")
+  deletedAt    DateTime?       @map("deleted_at")
+
+  bar   Bar?   @relation(fields: [barId], references: [id], onDelete: SetNull)
+  drink Drink? @relation(fields: [drinkId], references: [id], onDelete: SetNull)
+
+  @@index([section, published, sortOrder])
+  @@index([publishedAt])
+  @@map("magazine_editorials")
 }
 
 model PostLike {
@@ -1180,4 +1225,18 @@ model Notification {
 
   @@index([userId, readAt])
   @@map("notifications")
+}
+
+model DeviceToken {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  token     String   @unique
+  platform  String   @default("android")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("device_tokens")
 }

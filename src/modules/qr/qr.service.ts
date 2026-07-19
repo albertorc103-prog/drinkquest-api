@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
+  FeedPostType,
   NotificationType,
   QrSessionStatus,
   SpecialDrinkApprovalStatus,
@@ -13,6 +14,7 @@ import { MissionsService } from '../missions/missions.service';
 import { BarMissionsService } from '../bar-missions/bar-missions.service';
 import { GlobalEventsService } from '../global-events/global-events.service';
 import { BarAccessService } from '../subscriptions/bar-access.service';
+import { FeedService } from '../feed/feed.service';
 
 export interface QrPayloadResponse {
   sessionId: string;
@@ -40,6 +42,7 @@ export class QrService {
     private readonly barMissions: BarMissionsService,
     private readonly globalEvents: GlobalEventsService,
     private readonly barAccess: BarAccessService,
+    private readonly feed: FeedService,
   ) {}
 
   async createSession(
@@ -199,6 +202,19 @@ export class QrService {
       '¡Bebida desbloqueada!',
       session.drink.name,
       { drinkId: session.drinkId, barId: session.barId },
+    );
+
+    void this.feed.createSystemPostSafe(
+      userId,
+      FeedPostType.UNLOCK,
+      `Desbloqueó ${session.drink.name} en ${session.bar.businessName} (+${xp} XP)`,
+      {
+        drinkId: session.drinkId,
+        drinkName: session.drink.name,
+        barId: session.barId,
+        businessName: session.bar.businessName,
+        xpEarned: xp,
+      },
     );
 
     this.logger.log(

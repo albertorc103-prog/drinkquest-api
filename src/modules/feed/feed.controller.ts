@@ -11,8 +11,10 @@ export class FeedController {
   constructor(private readonly feed: FeedService) {}
 
   @Get()
-  list(@Query('page') page?: string) {
-    return this.feed.feed(parseInt(page ?? '1', 10));
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  list(@CurrentUser() user: JwtPayload, @Query('page') page?: string) {
+    return this.feed.feed(parseInt(page ?? '1', 10), 20, user.sub);
   }
 
   @Get('trending')
@@ -32,6 +34,13 @@ export class FeedController {
   @ApiBearerAuth()
   like(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.feed.like(id, user.sub);
+  }
+
+  @Get('posts/:id/comments')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  listComments(@Param('id') id: string) {
+    return this.feed.listComments(id);
   }
 
   @Post('posts/:id/comments')

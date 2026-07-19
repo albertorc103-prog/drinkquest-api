@@ -1,8 +1,12 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
+import {
+  RegisterDeviceTokenDto,
+  UnregisterDeviceTokenDto,
+} from './dto/device-token.dto';
 import { NotificationsService } from './notifications.service';
 
 @ApiTags('notifications')
@@ -25,6 +29,26 @@ export class NotificationsController {
   @Get('unread-by-category')
   unreadByCategory(@CurrentUser() user: JwtPayload) {
     return this.notifications.unreadByCategory(user.sub);
+  }
+
+  @Post('devices/fcm')
+  registerDevice(
+    @CurrentUser() user: JwtPayload,
+    @Body() body: RegisterDeviceTokenDto,
+  ) {
+    return this.notifications.registerDeviceToken(
+      user.sub,
+      body.token,
+      body.platform,
+    );
+  }
+
+  @Delete('devices/fcm')
+  unregisterDevice(
+    @CurrentUser() user: JwtPayload,
+    @Body() body: UnregisterDeviceTokenDto,
+  ) {
+    return this.notifications.unregisterDeviceToken(user.sub, body.token);
   }
 
   @Patch(':id/read')
