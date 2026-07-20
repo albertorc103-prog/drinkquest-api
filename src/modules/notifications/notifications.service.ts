@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { NotificationType, Prisma, Role } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { RealtimeHub } from '../../common/realtime/realtime-hub.service';
-import { FcmService } from './fcm.service';
 
 const NEWS_COCKTAIL_TYPES: NotificationType[] = [
   NotificationType.SPECIAL_DRINK_PUBLISHED,
@@ -17,7 +16,6 @@ export class NotificationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeHub,
-    private readonly fcm: FcmService,
   ) {}
 
   async create(
@@ -33,10 +31,6 @@ export class NotificationsService {
     this.realtime.emitToUser(userId, 'notification', row);
     const summary = await this.messengerSummary(userId);
     this.realtime.emitToUser(userId, 'messenger_summary', summary);
-    void this.fcm.sendToUser(userId, title, body, {
-      type,
-      notificationId: row.id,
-    });
     return row;
   }
 
@@ -69,7 +63,6 @@ export class NotificationsService {
       created += result.count;
       for (const u of chunk) {
         this.realtime.emitToUser(u.id, 'notification', { type, title, body });
-        void this.fcm.sendToUser(u.id, title, body, { type });
       }
     }
     return { created };
@@ -88,14 +81,6 @@ export class NotificationsService {
     });
     if (!bar?.ownerUserId) return null;
     return this.create(bar.ownerUserId, type, title, body, payload);
-  }
-
-  async registerDeviceToken(userId: string, token: string, platform?: string) {
-    return this.fcm.registerToken(userId, token, platform ?? 'android');
-  }
-
-  async unregisterDeviceToken(userId: string, token: string) {
-    return this.fcm.unregisterToken(userId, token);
   }
 
   async list(userId: string, page = 1, limit = 30) {
