@@ -13,11 +13,13 @@ function authLinkTemplate(envKey: string, fallback: string): string {
 export default registerAs('smtp', () => ({
   enabled: parseMailEnabled(),
   host: process.env.SMTP_HOST?.trim() || undefined,
-  port: parseInt(process.env.SMTP_PORT ?? '1025', 10),
+  port: parseInt(process.env.SMTP_PORT ?? '587', 10),
   secure: process.env.SMTP_SECURE === 'true',
   user: process.env.SMTP_USER?.trim() || undefined,
   pass: process.env.SMTP_PASS?.trim() || undefined,
   from: process.env.SMTP_FROM?.trim() || 'noreply@drinkquest.com',
+  /** Preferido en Render: API HTTPS evita Connection timeout del SMTP. */
+  brevoApiKey: process.env.BREVO_API_KEY?.trim() || undefined,
   /** Deep link Android; sustituir {token} al enviar. */
   verifyEmailUrlTemplate: authLinkTemplate(
     'EMAIL_VERIFY_URL',

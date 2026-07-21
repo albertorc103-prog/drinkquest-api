@@ -55,8 +55,10 @@ services:
         sync: false
       - key: MINIO_PUBLIC_URL
         sync: false
-      # ─── Email SMTP ───
+      # ─── Email SMTP / Brevo API ───
       - key: MAIL_ENABLED
+        sync: false
+      - key: BREVO_API_KEY
         sync: false
       - key: SMTP_HOST
         sync: false

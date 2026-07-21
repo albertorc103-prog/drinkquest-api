@@ -141,19 +141,32 @@ Verificación de email y recuperación de contraseña. Los enlaces abren la **ap
 
 ### Variables en Render
 
+Render a menudo **bloquea o timeout SMTP** (puerto 587) → en logs verás `Connection timeout`.
+Usa la **API HTTP de Brevo** (recomendado):
+
+1. Brevo → **Settings** → **SMTP & API** → **API keys** → Create a key  
+2. En Render añade:
+
 ```
 MAIL_ENABLED=true
+BREVO_API_KEY=xkeysib-...
+SMTP_FROM=tu-remitente-verificado@gmail.com
+EMAIL_VERIFY_URL=drinkquest://auth/verify?token={token}
+EMAIL_RESET_URL=drinkquest://auth/reset?token={token}
+```
+
+SMTP opcional (puede seguir fallando en Render free):
+
+```
 SMTP_HOST=smtp-relay.brevo.com
 SMTP_PORT=587
 SMTP_SECURE=false
 SMTP_USER=tu-login-de-brevo@gmail.com
 SMTP_PASS=xsmtpsib-...
-SMTP_FROM=albertorc103@gmail.com
-EMAIL_VERIFY_URL=drinkquest://auth/verify?token={token}
-EMAIL_RESET_URL=drinkquest://auth/reset?token={token}
 ```
 
 > Mantén `{token}` literal — el backend lo sustituye al enviar.
+> `SMTP_FROM` debe ser un **sender verificado** en Brevo.
 
 ### Alternativa: Resend
 
@@ -208,9 +221,9 @@ SMTP_FROM=onboarding@resend.dev
 | Upload 503 "Almacenamiento no configurado" | Mismo + `NODE_ENV=production` | Configurar R2 arriba |
 | `redis: degraded` | `REDIS_URL` vacía o incorrecta | Upstash URL completa |
 | `ERR Only 0th database is supported` | URL con `/22` | Ya corregido en código; redeploy |
-| Email no llega | `MAIL_ENABLED=false` o sender no verificado | Brevo sender + `MAIL_ENABLED=true` |
-| `mail: degraded` en health | `SMTP_USER`/`SMTP_PASS` incorrectos | Login Brevo + clave SMTP `xsmtpsib-...` |
-| Brevo rechaza envío | `SMTP_FROM` no está en Senders verificados | Usar exactamente `jefe.vd@gmail.com` o `albertorc103@gmail.com` |
+| Email no llega | `MAIL_ENABLED=false` o SMTP timeout en Render | Usa `BREVO_API_KEY` (HTTPS). Revisa logs: `Connection timeout` = SMTP bloqueado |
+| `mail: degraded` en health | API key inválida o SMTP caído | Brevo → API keys; `SMTP_FROM` verificado |
+| Brevo rechaza envío | `SMTP_FROM` no está en Senders verificados | Usar exactamente el email verificado en Brevo |
 | Registro sin correo | Falló SMTP al registrarse (error silencioso) | Pulsa **Reenviar** en perfil tras configurar SMTP |
 | Enlace email no abre app | URL web en vez de deep link | Usar `EMAIL_VERIFY_URL` de arriba |
 

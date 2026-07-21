@@ -6,50 +6,86 @@ import * as nodemailer from 'nodemailer';
 export class MailService {
   private readonly logger = new Logger(MailService.name);
   private readonly transporter: nodemailer.Transporter | null;
+  private readonly brevoApiKey: string | undefined;
 
   constructor(private readonly config: ConfigService) {
+    this.brevoApiKey = this.config.get<string>('smtp.brevoApiKey') || undefined;
+
     if (this.isMailEnabled()) {
-      const host = this.config.get<string>('smtp.host')!;
+      const host = this.config.get<string>('smtp.host');
       const port = this.config.get<number>('smtp.port') ?? 587;
       const user = this.config.get<string>('smtp.user');
       const pass = this.config.get<string>('smtp.pass');
-      if (!user || !pass) {
-        this.logger.warn('MAIL_ENABLED=true pero faltan SMTP_USER o SMTP_PASS');
-        this.transporter = null;
+      const secure = this.config.get<boolean>('smtp.secure') === true || port === 465;
+      const hasAuth = Boolean(user && pass);
+
+      if (this.brevoApiKey) {
+        this.logger.log('Brevo API key configured (HTTPS) — preferred on Render');
+      }
+
+      if (host) {
+        // Mailpit local: sin auth. Brevo SMTP: con auth.
+        if (!hasAuth && port === 587 && !this.brevoApiKey) {
+          this.logger.warn(
+            'MAIL_ENABLED=true en puerto 587 sin SMTP_USER/SMTP_PASS ni BREVO_API_KEY',
+          );
+          this.transporter = null;
+        } else {
+          this.transporter = nodemailer.createTransport({
+            host,
+            port,
+            secure,
+            requireTLS: port === 587 && hasAuth,
+            ...(hasAuth ? { auth: { user: user!, pass: pass! } } : {}),
+            connectionTimeout: 25_000,
+            greetingTimeout: 20_000,
+            socketTimeout: 30_000,
+          });
+          this.logger.log(
+            `SMTP configured (${host}:${port}, auth=${hasAuth}, from=${this.config.get<string>('smtp.from')})`,
+          );
+        }
       } else {
-        this.transporter = nodemailer.createTransport({
-          host,
-          port,
-          secure: port === 465,
-          requireTLS: port === 587,
-          auth: { user, pass },
-          pool: true,
-          maxConnections: 1,
-          maxMessages: 10,
-          connectionTimeout: 10_000,
-          greetingTimeout: 10_000,
-          socketTimeout: 20_000,
-        });
-        this.logger.log(`SMTP enabled (${host}:${port}, from=${this.config.get<string>('smtp.from')})`);
+        this.transporter = null;
+        if (!this.brevoApiKey) {
+          this.logger.warn('MAIL_ENABLED=true pero faltan SMTP_HOST y BREVO_API_KEY');
+        }
       }
     } else {
       this.transporter = null;
-      this.logger.log('SMTP disabled (MAIL_ENABLED=false or SMTP_HOST empty)');
+      this.logger.log('Mail disabled (MAIL_ENABLED=false)');
     }
   }
 
   isMailEnabled(): boolean {
-    if (this.config.get<boolean>('smtp.enabled') !== true) return false;
-    const host = this.config.get<string>('smtp.host');
-    return typeof host === 'string' && host.length > 0;
+    return this.config.get<boolean>('smtp.enabled') === true;
   }
 
   isConfigured(): boolean {
-    return this.isMailEnabled() && this.transporter !== null;
+    if (!this.isMailEnabled()) return false;
+    return Boolean(this.brevoApiKey) || this.transporter != null;
   }
 
-  /** Comprueba login SMTP (no envía correo). */
+  /** Comprueba que el canal de correo esté usable. */
   async verifyConnection(): Promise<boolean> {
+    if (!this.isConfigured()) return false;
+    if (this.brevoApiKey) {
+      try {
+        const res = await fetch('https://api.brevo.com/v3/account', {
+          headers: { 'api-key': this.brevoApiKey },
+          signal: AbortSignal.timeout(15_000),
+        });
+        if (!res.ok) {
+          this.logger.warn(`Brevo API verify failed: HTTP ${res.status}`);
+          return false;
+        }
+        return true;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Brevo API verify failed: ${message}`);
+        return false;
+      }
+    }
     if (!this.transporter) return false;
     try {
       await this.transporter.verify();
@@ -106,13 +142,23 @@ export class MailService {
   }
 
   private async send(to: string, subject: string, text: string): Promise<void> {
+    if (!this.isConfigured()) {
+      throw new Error('Correo no configurado en el servidor');
+    }
+    const from = this.config.get<string>('smtp.from') || 'noreply@drinkquest.com';
+
+    // En Render el SMTP suele dar Connection timeout; la API HTTPS de Brevo sí funciona.
+    if (this.brevoApiKey) {
+      await this.sendViaBrevoApi(to, subject, text, from);
+      return;
+    }
+
     if (!this.transporter) {
       throw new Error('SMTP no configurado en el servidor');
     }
-    const from = this.config.get<string>('smtp.from');
     try {
       const info = await this.transporter.sendMail({
-        from: from?.includes('<') ? from : `DrinkQuest <${from}>`,
+        from: from.includes('<') ? from : `DrinkQuest <${from}>`,
         to,
         subject,
         text,
@@ -123,5 +169,38 @@ export class MailService {
       this.logger.warn(`SMTP send failed (${to}, ${subject}): ${message}`);
       throw err;
     }
+  }
+
+  private async sendViaBrevoApi(
+    to: string,
+    subject: string,
+    text: string,
+    from: string,
+  ): Promise<void> {
+    const senderEmail = from.includes('<')
+      ? (from.match(/<([^>]+)>/)?.[1] ?? from)
+      : from;
+    const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        'api-key': this.brevoApiKey!,
+      },
+      body: JSON.stringify({
+        sender: { name: 'DrinkQuest', email: senderEmail.trim() },
+        to: [{ email: to }],
+        subject,
+        textContent: text,
+      }),
+      signal: AbortSignal.timeout(25_000),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      this.logger.warn(`Brevo API send failed (${to}, ${subject}): HTTP ${res.status} ${body}`);
+      throw new Error(`Brevo API HTTP ${res.status}`);
+    }
+    const data = (await res.json().catch(() => ({}))) as { messageId?: string };
+    this.logger.log(`Brevo API sent to ${to} (${subject}) id=${data.messageId ?? 'n/a'}`);
   }
 }

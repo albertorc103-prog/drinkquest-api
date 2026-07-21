@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { Role } from '@prisma/client';
+import { Prisma, Role } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { hashPassword, randomToken, sha256, slugify, verifyPassword } from '../../common/utils/crypto.util';
 import { MailService } from '../notifications/mail.service';
@@ -43,7 +43,9 @@ export class AuthService {
   async register(dto: RegisterDto): Promise<AuthSessionResponseDto> {
     const email = dto.email.trim().toLowerCase();
     const exists = await this.prisma.user.findUnique({ where: { email } });
-    if (exists) throw new ConflictException('El email ya está registrado');
+    if (exists && !exists.deletedAt) {
+      throw new ConflictException('El email ya está registrado');
+    }
 
     const role = dto.role ?? Role.USER;
     if (role === Role.BAR && !dto.businessName?.trim()) {
@@ -51,36 +53,82 @@ export class AuthService {
     }
 
     const passwordHash = await hashPassword(dto.password);
+    const displayName = dto.displayName.trim();
+
+    // Cuenta soft-deleted: reactivar en lugar de bloquear el email para siempre.
+    if (exists?.deletedAt) {
+      const restored = await this.prisma.$transaction(async (tx) => {
+        const user = await tx.user.update({
+          where: { id: exists.id },
+          data: {
+            passwordHash,
+            displayName,
+            role,
+            deletedAt: null,
+            emailVerified: false,
+            emailVerifiedAt: null,
+          },
+        });
+        if (role === Role.BAR) {
+          const existingBar = await tx.bar.findFirst({
+            where: { ownerUserId: user.id },
+          });
+          if (!existingBar) {
+            await this.createBarForOwner(tx, user.id, dto.businessName!);
+          } else if (existingBar.deletedAt) {
+            await tx.bar.update({
+              where: { id: existingBar.id },
+              data: {
+                deletedAt: null,
+                businessName: dto.businessName!.trim(),
+              },
+            });
+          }
+        }
+        return user;
+      });
+      this.queueEmailVerification(restored.id, restored.email);
+      return this.issueTokensForUser(restored.id, restored.email, restored.role);
+    }
+
     const user = await this.prisma.$transaction(async (tx) => {
       const created = await tx.user.create({
         data: {
           email,
           passwordHash,
-          displayName: dto.displayName.trim(),
+          displayName,
           role,
         },
       });
       if (role === Role.BAR) {
-        const baseSlug = slugify(dto.businessName!);
-        let slug = baseSlug;
-        let n = 1;
-        while (await tx.bar.findUnique({ where: { slug } })) {
-          slug = `${baseSlug}-${n++}`;
-        }
-        const bar = await tx.bar.create({
-          data: {
-            ownerUserId: created.id,
-            businessName: dto.businessName!.trim(),
-            slug,
-          },
-        });
-        await this.subscriptions.createTrialSubscription(bar.id, tx);
+        await this.createBarForOwner(tx, created.id, dto.businessName!);
       }
       return created;
     });
 
     this.queueEmailVerification(user.id, user.email);
     return this.issueTokensForUser(user.id, user.email, user.role);
+  }
+
+  private async createBarForOwner(
+    tx: Prisma.TransactionClient,
+    ownerUserId: string,
+    businessName: string,
+  ) {
+    const baseSlug = slugify(businessName);
+    let slug = baseSlug;
+    let n = 1;
+    while (await tx.bar.findUnique({ where: { slug } })) {
+      slug = `${baseSlug}-${n++}`;
+    }
+    const bar = await tx.bar.create({
+      data: {
+        ownerUserId,
+        businessName: businessName.trim(),
+        slug,
+      },
+    });
+    await this.subscriptions.createTrialSubscription(bar.id, tx);
   }
 
   async login(email: string, password: string, intent: AuthLoginIntent): Promise<AuthSessionResponseDto> {
@@ -144,7 +192,10 @@ export class AuthService {
     const user = await this.prisma.user.findFirst({
       where: { email: email.trim().toLowerCase(), deletedAt: null },
     });
-    if (!user) return { message: 'Si el email existe, recibirás instrucciones.' };
+    // Respuesta genérica para no filtrar si el email existe.
+    const generic = { message: 'Si el email existe, recibirás instrucciones.' };
+    if (!user) return generic;
+
     const token = randomToken();
     await this.prisma.passwordReset.create({
       data: {
@@ -153,13 +204,21 @@ export class AuthService {
         expiresAt: new Date(Date.now() + 3600_000),
       },
     });
+
+    if (!this.mail.isConfigured()) {
+      this.logger.warn(
+        `Forgot-password: token creado para ${user.email} pero SMTP no está configurado (MAIL_ENABLED/SMTP_*). El correo no se enviará.`,
+      );
+      return generic;
+    }
+
     try {
       await this.mail.sendPasswordReset(user.email, token);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.warn(`Forgot-password OK but email failed: ${message}`);
     }
-    return { message: 'Si el email existe, recibirás instrucciones.' };
+    return generic;
   }
 
   async resetPassword(token: string, newPassword: string): Promise<{ message: string }> {

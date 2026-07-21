@@ -75,7 +75,7 @@ export class HealthController {
     }
 
     try {
-      checks.mail = this.mail.isConfigured() ? 'ok' : 'degraded';
+      checks.mail = (await this.mail.verifyConnection()) ? 'ok' : 'degraded';
     } catch {
       checks.mail = 'degraded';
     }

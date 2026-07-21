@@ -65,6 +65,19 @@ services:
       exit 0;
       "
 
+  # Bandeja SMTP local: UI http://localhost:8025 — captura verify/reset sin Brevo
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: drinkquest-mailpit
+    restart: unless-stopped
+    ports:
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+    environment:
+      MP_MAX_MESSAGES: 500
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+
   migrate:
     build:
       context: .
@@ -97,6 +110,8 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      mailpit:
+        condition: service_started
     env_file:
       - .env
     environment:
@@ -108,6 +123,15 @@ services:
       REDIS_PORT: 6379
       MINIO_ENDPOINT: minio
       MINIO_PORT: 9000
+      MAIL_ENABLED: "true"
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_SECURE: "false"
+      SMTP_USER: ""
+      SMTP_PASS: ""
+      SMTP_FROM: ${SMTP_FROM:-noreply@drinkquest.local}
+      EMAIL_VERIFY_URL: drinkquest://auth/verify?token={token}
+      EMAIL_RESET_URL: drinkquest://auth/reset?token={token}
     ports:
       - "${API_PORT:-3000}:3000"
     volumes:

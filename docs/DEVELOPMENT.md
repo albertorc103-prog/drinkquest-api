@@ -4,7 +4,9 @@
 
 Copia `.env.example` → `.env`. Obligatorias:
 
-**Correo en local:** deja `MAIL_ENABLED=false` y `SMTP_HOST` vacío. El registro funciona sin SMTP; verás `[MAIL_DISABLED] Verification email skipped` en logs.
+**Correo en línea:** la app usa `https://drinkquest-api.onrender.com`. El SMTP se configura en **Render → Environment** (Brevo). Guía: [PRODUCTION_INFRA.md](./PRODUCTION_INFRA.md).
+
+**Correo en local (opcional):** `docker compose up -d mailpit` y `MAIL_ENABLED=true` con `SMTP_HOST=localhost` / puerto `1025`. UI: http://localhost:8025.
 
 - `DATABASE_URL`
 - `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` (mín. 32 caracteres)
