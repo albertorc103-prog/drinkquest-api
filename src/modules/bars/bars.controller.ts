@@ -48,6 +48,18 @@ export class BarsController {
     return this.stripeCheckout.createCheckoutSession(user.sub, body.plan);
   }
 
+  @Post('subscription/sync')
+  @ApiOperation({
+    summary:
+      'Sincroniza el plan local con Stripe tras el checkout (fallback si el webhook tarda o falla)',
+  })
+  syncSubscription(
+    @CurrentUser() user: JwtPayload,
+    @Body() body: { sessionId?: string },
+  ) {
+    return this.stripeCheckout.syncSubscriptionFromStripe(user.sub, body?.sessionId);
+  }
+
   @Get('dashboard')
   dashboard(@CurrentUser() user: JwtPayload) {
     return this.bars.dashboard(user.sub);

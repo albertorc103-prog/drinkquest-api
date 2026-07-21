@@ -51,7 +51,11 @@ export class StripeSubscriptionSyncService {
 
     const priceId = stripeSub.items.data[0]?.price?.id;
     const planFromPrice = priceId ? planForStripePriceId(priceId, this.config) : null;
-    const plan = planFromPrice ?? normalizeSubscriptionPlan(local.plan);
+    // Si los Price ID de env no coinciden (test/live o typo), usar metadata del checkout.
+    const planFromMeta = stripeSub.metadata?.plan
+      ? normalizeSubscriptionPlan(stripeSub.metadata.plan)
+      : null;
+    const plan = planFromPrice ?? planFromMeta ?? normalizeSubscriptionPlan(local.plan);
     const status = this.mapStripeStatus(stripeSub.status);
     const currentPeriodEnd = new Date(stripeSub.current_period_end * 1000);
     const canceledAt = stripeSub.canceled_at
