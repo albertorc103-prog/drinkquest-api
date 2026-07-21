@@ -382,6 +382,8 @@ model Bar {
   bannerUrl    String?  @map("banner_url")
   latitude     Float?
   longitude    Float?
+  /// Horario de apertura estructurado: { days: [{ day, closed, open, close }] }
+  openingHours Json?    @map("opening_hours")
   isVerified   Boolean  @default(false) @map("is_verified")
   isActive     Boolean  @default(true) @map("is_active")
   /// El bar declara terraza o jardín (Legend).

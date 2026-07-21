@@ -1,11 +1,12 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { RooftopVerificationStatus } from '@prisma/client';
+import { Prisma, RooftopVerificationStatus } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import {
   isExplorerPlan,
   normalizeSubscriptionPlan,
   rooftopEnabledForPlan,
 } from '../subscriptions/subscription-plan.util';
+import { normalizeOpeningHours } from './opening-hours.util';
 
 @Injectable()
 export class BarsService {
@@ -39,6 +40,12 @@ export class BarsService {
 
     if ('latitude' in data) updateData.latitude = this.parseCoordinate(data.latitude, -90, 90);
     if ('longitude' in data) updateData.longitude = this.parseCoordinate(data.longitude, -180, 180);
+
+    if ('openingHours' in data) {
+      const normalized = normalizeOpeningHours(data.openingHours);
+      updateData.openingHours =
+        normalized === null ? Prisma.DbNull : (normalized as unknown as Prisma.InputJsonValue);
+    }
 
     if ('hasOutdoorSpace' in data) {
       const subscription = await this.prisma.barSubscription.findUnique({
