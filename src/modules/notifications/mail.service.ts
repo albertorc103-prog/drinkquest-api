@@ -1,27 +1,45 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 
+function cleanSecret(raw: string | undefined | null): string | undefined {
+  if (!raw) return undefined;
+  let v = raw.trim();
+  // Render/pegar a veces deja comillas o saltos.
+  if (
+    (v.startsWith('"') && v.endsWith('"')) ||
+    (v.startsWith("'") && v.endsWith("'"))
+  ) {
+    v = v.slice(1, -1).trim();
+  }
+  v = v.replace(/\r|\n|\t/g, '').trim();
+  return v.length > 0 ? v : undefined;
+}
+
 @Injectable()
-export class MailService {
+export class MailService implements OnModuleInit {
   private readonly logger = new Logger(MailService.name);
   private readonly transporter: nodemailer.Transporter | null;
   private readonly brevoApiKey: string | undefined;
 
   constructor(private readonly config: ConfigService) {
-    // Fallback a process.env por si el namespace smtp no cargó en el bootstrap.
-    this.brevoApiKey =
-      this.config.get<string>('smtp.brevoApiKey')?.trim() ||
-      process.env.BREVO_API_KEY?.trim() ||
-      undefined;
+    this.brevoApiKey = cleanSecret(
+      this.config.get<string>('smtp.brevoApiKey') || process.env.BREVO_API_KEY,
+    );
 
     if (this.isMailEnabled()) {
-      const host = this.config.get<string>('smtp.host') || process.env.SMTP_HOST?.trim();
+      const host = cleanSecret(
+        this.config.get<string>('smtp.host') || process.env.SMTP_HOST,
+      );
       const port =
         this.config.get<number>('smtp.port') ??
         parseInt(process.env.SMTP_PORT ?? '587', 10);
-      const user = this.config.get<string>('smtp.user') || process.env.SMTP_USER?.trim();
-      const pass = this.config.get<string>('smtp.pass') || process.env.SMTP_PASS?.trim();
+      const user = cleanSecret(
+        this.config.get<string>('smtp.user') || process.env.SMTP_USER,
+      );
+      const pass = cleanSecret(
+        this.config.get<string>('smtp.pass') || process.env.SMTP_PASS,
+      );
       const secure =
         this.config.get<boolean>('smtp.secure') === true ||
         process.env.SMTP_SECURE === 'true' ||
@@ -31,8 +49,17 @@ export class MailService {
 
       this.logger.log(
         `Mail bootstrap: enabled=true hasBrevoKey=${Boolean(this.brevoApiKey)} ` +
+          `brevoKeyPrefix=${this.brevoApiKey?.slice(0, 12) ?? 'none'} ` +
+          `brevoKeyLen=${this.brevoApiKey?.length ?? 0} ` +
           `hasSmtpHost=${Boolean(host)} from=${from}`,
       );
+
+      if (this.brevoApiKey && !this.brevoApiKey.startsWith('xkeysib-')) {
+        this.logger.warn(
+          'BREVO_API_KEY no empieza por xkeysib- (¿pegaste la clave SMTP xsmtpsib- o una clave MCP?). ' +
+            'Usa Claves API (no SMTP, no MCP).',
+        );
+      }
 
       if (this.brevoApiKey) {
         this.logger.log('Brevo API key configured (HTTPS) — preferred on Render');
@@ -69,6 +96,12 @@ export class MailService {
     }
   }
 
+  async onModuleInit(): Promise<void> {
+    if (!this.brevoApiKey || !this.isMailEnabled()) return;
+    const ok = await this.verifyConnection();
+    this.logger.log(`Brevo API startup verify: ${ok ? 'ok' : 'FAILED — revisa la clave en Render'}`);
+  }
+
   isMailEnabled(): boolean {
     if (this.config.get<boolean>('smtp.enabled') === true) return true;
     const raw = process.env.MAIL_ENABLED?.trim().toLowerCase();
@@ -83,15 +116,17 @@ export class MailService {
   /** Motivo legible para /health (sin secretos). */
   getMailStatusDetail(): string {
     if (!this.isMailEnabled()) return 'MAIL_ENABLED is not true';
-    if (this.brevoApiKey) return 'brevo_api_key_present';
+    if (this.brevoApiKey) {
+      const prefixOk = this.brevoApiKey.startsWith('xkeysib-');
+      return `brevo_api_key_present; prefix_ok=${prefixOk}; len=${this.brevoApiKey.length}`;
+    }
     if (this.transporter) return 'smtp_transporter_present';
     return 'missing BREVO_API_KEY and SMTP';
   }
 
   private getFromAddress(): string {
     return (
-      this.config.get<string>('smtp.from')?.trim() ||
-      process.env.SMTP_FROM?.trim() ||
+      cleanSecret(this.config.get<string>('smtp.from') || process.env.SMTP_FROM) ||
       'noreply@drinkquest.com'
     );
   }
@@ -100,26 +135,30 @@ export class MailService {
   async verifyConnection(): Promise<boolean> {
     if (!this.isConfigured()) return false;
     if (this.brevoApiKey) {
-      try {
-        // /v3/account a veces falla por permisos; senders basta para validar la key.
-        const res = await fetch('https://api.brevo.com/v3/senders', {
-          headers: {
-            accept: 'application/json',
-            'api-key': this.brevoApiKey,
-          },
-          signal: AbortSignal.timeout(15_000),
-        });
-        if (!res.ok) {
+      const endpoints = [
+        'https://api.brevo.com/v3/account',
+        'https://api.brevo.com/v3/senders',
+      ];
+      for (const url of endpoints) {
+        try {
+          const res = await fetch(url, {
+            headers: {
+              accept: 'application/json',
+              'api-key': this.brevoApiKey,
+            },
+            signal: AbortSignal.timeout(15_000),
+          });
+          if (res.ok) return true;
           const body = await res.text().catch(() => '');
-          this.logger.warn(`Brevo API verify failed: HTTP ${res.status} ${body.slice(0, 200)}`);
-          return false;
+          this.logger.warn(
+            `Brevo API verify failed (${url}): HTTP ${res.status} ${body.slice(0, 300)}`,
+          );
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          this.logger.warn(`Brevo API verify failed (${url}): ${message}`);
         }
-        return true;
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        this.logger.warn(`Brevo API verify failed: ${message}`);
-        return false;
       }
+      return false;
     }
     if (!this.transporter) return false;
     try {
