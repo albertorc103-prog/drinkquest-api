@@ -74,10 +74,18 @@ export class HealthController {
       checks.redis = 'degraded';
     }
 
+    let mailDetail = this.mail.getMailStatusDetail();
     try {
-      checks.mail = (await this.mail.verifyConnection()) ? 'ok' : 'degraded';
+      const ok = await this.mail.verifyConnection();
+      checks.mail = ok ? 'ok' : 'degraded';
+      if (!ok) {
+        mailDetail = `${mailDetail}; verify_failed`;
+      } else {
+        mailDetail = `${mailDetail}; verify_ok`;
+      }
     } catch {
       checks.mail = 'degraded';
+      mailDetail = `${mailDetail}; verify_exception`;
     }
 
     const requiredEnvKeys = ['DATABASE_URL', 'JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET'];
@@ -99,6 +107,7 @@ export class HealthController {
     return {
       status: hasDegraded ? 'degraded' : 'ok',
       services: checks,
+      mailDetail,
       timestamp: new Date().toISOString(),
     };
   }

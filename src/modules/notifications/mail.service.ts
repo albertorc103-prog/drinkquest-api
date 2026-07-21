@@ -9,22 +9,36 @@ export class MailService {
   private readonly brevoApiKey: string | undefined;
 
   constructor(private readonly config: ConfigService) {
-    this.brevoApiKey = this.config.get<string>('smtp.brevoApiKey') || undefined;
+    // Fallback a process.env por si el namespace smtp no cargó en el bootstrap.
+    this.brevoApiKey =
+      this.config.get<string>('smtp.brevoApiKey')?.trim() ||
+      process.env.BREVO_API_KEY?.trim() ||
+      undefined;
 
     if (this.isMailEnabled()) {
-      const host = this.config.get<string>('smtp.host');
-      const port = this.config.get<number>('smtp.port') ?? 587;
-      const user = this.config.get<string>('smtp.user');
-      const pass = this.config.get<string>('smtp.pass');
-      const secure = this.config.get<boolean>('smtp.secure') === true || port === 465;
+      const host = this.config.get<string>('smtp.host') || process.env.SMTP_HOST?.trim();
+      const port =
+        this.config.get<number>('smtp.port') ??
+        parseInt(process.env.SMTP_PORT ?? '587', 10);
+      const user = this.config.get<string>('smtp.user') || process.env.SMTP_USER?.trim();
+      const pass = this.config.get<string>('smtp.pass') || process.env.SMTP_PASS?.trim();
+      const secure =
+        this.config.get<boolean>('smtp.secure') === true ||
+        process.env.SMTP_SECURE === 'true' ||
+        port === 465;
       const hasAuth = Boolean(user && pass);
+      const from = this.getFromAddress();
+
+      this.logger.log(
+        `Mail bootstrap: enabled=true hasBrevoKey=${Boolean(this.brevoApiKey)} ` +
+          `hasSmtpHost=${Boolean(host)} from=${from}`,
+      );
 
       if (this.brevoApiKey) {
         this.logger.log('Brevo API key configured (HTTPS) — preferred on Render');
       }
 
       if (host) {
-        // Mailpit local: sin auth. Brevo SMTP: con auth.
         if (!hasAuth && port === 587 && !this.brevoApiKey) {
           this.logger.warn(
             'MAIL_ENABLED=true en puerto 587 sin SMTP_USER/SMTP_PASS ni BREVO_API_KEY',
@@ -41,9 +55,7 @@ export class MailService {
             greetingTimeout: 20_000,
             socketTimeout: 30_000,
           });
-          this.logger.log(
-            `SMTP configured (${host}:${port}, auth=${hasAuth}, from=${this.config.get<string>('smtp.from')})`,
-          );
+          this.logger.log(`SMTP configured (${host}:${port}, auth=${hasAuth})`);
         }
       } else {
         this.transporter = null;
@@ -58,7 +70,9 @@ export class MailService {
   }
 
   isMailEnabled(): boolean {
-    return this.config.get<boolean>('smtp.enabled') === true;
+    if (this.config.get<boolean>('smtp.enabled') === true) return true;
+    const raw = process.env.MAIL_ENABLED?.trim().toLowerCase();
+    return raw === 'true' || raw === '1' || raw === 'yes';
   }
 
   isConfigured(): boolean {
@@ -66,17 +80,38 @@ export class MailService {
     return Boolean(this.brevoApiKey) || this.transporter != null;
   }
 
+  /** Motivo legible para /health (sin secretos). */
+  getMailStatusDetail(): string {
+    if (!this.isMailEnabled()) return 'MAIL_ENABLED is not true';
+    if (this.brevoApiKey) return 'brevo_api_key_present';
+    if (this.transporter) return 'smtp_transporter_present';
+    return 'missing BREVO_API_KEY and SMTP';
+  }
+
+  private getFromAddress(): string {
+    return (
+      this.config.get<string>('smtp.from')?.trim() ||
+      process.env.SMTP_FROM?.trim() ||
+      'noreply@drinkquest.com'
+    );
+  }
+
   /** Comprueba que el canal de correo esté usable. */
   async verifyConnection(): Promise<boolean> {
     if (!this.isConfigured()) return false;
     if (this.brevoApiKey) {
       try {
-        const res = await fetch('https://api.brevo.com/v3/account', {
-          headers: { 'api-key': this.brevoApiKey },
+        // /v3/account a veces falla por permisos; senders basta para validar la key.
+        const res = await fetch('https://api.brevo.com/v3/senders', {
+          headers: {
+            accept: 'application/json',
+            'api-key': this.brevoApiKey,
+          },
           signal: AbortSignal.timeout(15_000),
         });
         if (!res.ok) {
-          this.logger.warn(`Brevo API verify failed: HTTP ${res.status}`);
+          const body = await res.text().catch(() => '');
+          this.logger.warn(`Brevo API verify failed: HTTP ${res.status} ${body.slice(0, 200)}`);
           return false;
         }
         return true;
@@ -107,7 +142,9 @@ export class MailService {
       return;
     }
     const url = this.authLink(
-      this.config.get<string>('smtp.verifyEmailUrlTemplate')!,
+      this.config.get<string>('smtp.verifyEmailUrlTemplate') ||
+        process.env.EMAIL_VERIFY_URL ||
+        'drinkquest://auth/verify?token={token}',
       token,
     );
     await this.send(
@@ -131,7 +168,9 @@ export class MailService {
       return;
     }
     const url = this.authLink(
-      this.config.get<string>('smtp.resetPasswordUrlTemplate')!,
+      this.config.get<string>('smtp.resetPasswordUrlTemplate') ||
+        process.env.EMAIL_RESET_URL ||
+        'drinkquest://auth/reset?token={token}',
       token,
     );
     await this.send(
@@ -143,11 +182,10 @@ export class MailService {
 
   private async send(to: string, subject: string, text: string): Promise<void> {
     if (!this.isConfigured()) {
-      throw new Error('Correo no configurado en el servidor');
+      throw new Error('Correo no configurado en el servidor (MAIL_ENABLED / BREVO_API_KEY)');
     }
-    const from = this.config.get<string>('smtp.from') || 'noreply@drinkquest.com';
+    const from = this.getFromAddress();
 
-    // En Render el SMTP suele dar Connection timeout; la API HTTPS de Brevo sí funciona.
     if (this.brevoApiKey) {
       await this.sendViaBrevoApi(to, subject, text, from);
       return;
@@ -197,7 +235,10 @@ export class MailService {
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      this.logger.warn(`Brevo API send failed (${to}, ${subject}): HTTP ${res.status} ${body}`);
+      this.logger.warn(
+        `Brevo API send failed (${to}, ${subject}): HTTP ${res.status} ${body}. ` +
+          `Revisa BREVO_API_KEY y que SMTP_FROM=${senderEmail} esté verificado en Brevo → Remitentes.`,
+      );
       throw new Error(`Brevo API HTTP ${res.status}`);
     }
     const data = (await res.json().catch(() => ({}))) as { messageId?: string };
