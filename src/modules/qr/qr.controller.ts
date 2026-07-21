@@ -61,6 +61,7 @@ export class QrController {
     if (!bar) {
       return {
         unlocksToday: 0,
+        unlocksYesterday: 0,
         mostPopularDrink: '—',
         uniqueUsers: 0,
         totalScans: 0,
@@ -69,6 +70,7 @@ export class QrController {
         peakHours: Array.from({ length: 24 }, () => 0),
         newUsers: 0,
         returningUsers: 0,
+        updatedAt: new Date().toISOString(),
       };
     }
     return this.qr.analytics(bar.id);

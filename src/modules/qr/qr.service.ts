@@ -268,6 +268,8 @@ export class QrService {
   async analytics(barId: string) {
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
+    const startOfYesterday = new Date(startOfDay);
+    startOfYesterday.setDate(startOfYesterday.getDate() - 1);
 
     const used = await this.prisma.qrSession.findMany({
       where: { barId, status: QrSessionStatus.USED },
@@ -276,6 +278,9 @@ export class QrService {
     });
 
     const today = used.filter((s) => s.usedAt && s.usedAt >= startOfDay);
+    const yesterday = used.filter(
+      (s) => s.usedAt && s.usedAt >= startOfYesterday && s.usedAt < startOfDay,
+    );
     const counts = new Map<string, number>();
     for (const s of used) {
       counts.set(s.drink.name, (counts.get(s.drink.name) ?? 0) + 1);
@@ -317,6 +322,7 @@ export class QrService {
 
     return {
       unlocksToday: today.length,
+      unlocksYesterday: yesterday.length,
       mostPopularDrink: top?.[0] ?? '—',
       uniqueUsers,
       totalScans: used.length,
@@ -325,6 +331,7 @@ export class QrService {
       peakHours,
       newUsers,
       returningUsers,
+      updatedAt: new Date().toISOString(),
     };
   }
 
