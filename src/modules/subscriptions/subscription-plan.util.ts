@@ -178,6 +178,16 @@ export function promoPriorityEnabledForPlan(plan: SubscriptionPlan): boolean {
   return normalizeSubscriptionPlan(plan) === SubscriptionPlan.LEGEND;
 }
 
+/** Publicar promos de shots / bebidas fuertes en magazine Fuerte: solo Legend. */
+export function strongMagazinePromoEnabledForPlan(plan: SubscriptionPlan): boolean {
+  return normalizeSubscriptionPlan(plan) === SubscriptionPlan.LEGEND;
+}
+
+/** Tope de piezas publicadas en Fuerte por local Legend. */
+export function strongMagazinePromoLimit(): number {
+  return 5;
+}
+
 /** Prioridad base añadida al ranking de promos Legend. */
 export function legendPromoPriorityBoost(): number {
   return 50;
