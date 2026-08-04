@@ -1,12 +1,30 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { DrinkRarity, Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
+import { MissionsService } from '../missions/missions.service';
+import { CreateDrinkHistoryDto } from './dto/create-drink-history.dto';
+
+/** Alineado con XpEngine.XP_REPEAT_REGISTER en la app Android. */
+const XP_REPEAT_REGISTER = 8;
 
 @Injectable()
 export class DrinksService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly missions: MissionsService,
+  ) {}
 
-  async list(params: { categoryId?: string; rarity?: DrinkRarity; search?: string; page?: number; limit?: number }) {
+  async list(params: {
+    categoryId?: string;
+    rarity?: DrinkRarity;
+    search?: string;
+    page?: number;
+    limit?: number;
+  }) {
     const page = params.page ?? 1;
     const limit = Math.min(params.limit ?? 20, 100);
     const where: Prisma.DrinkWhereInput = {
@@ -75,6 +93,87 @@ export class DrinksService {
     return { items, total, page, limit };
   }
 
+  /**
+   * Registro manual de bebida (app → POST drinks/me/history).
+   * Shape: { entry, xpEarned, totalXp, isFirstTimeForDrink }
+   */
+  async logHistory(userId: string, dto: CreateDrinkHistoryDto) {
+    const drink = await this.prisma.drink.findFirst({
+      where: { id: dto.drinkId, deletedAt: null },
+    });
+    if (!drink) throw new NotFoundException('Bebida no encontrada');
+
+    if (dto.barId) {
+      const bar = await this.prisma.bar.findFirst({
+        where: { id: dto.barId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!bar) throw new BadRequestException('Bar no encontrado');
+    }
+
+    let loggedAt = new Date();
+    if (dto.loggedAt) {
+      const parsed = new Date(dto.loggedAt);
+      if (Number.isNaN(parsed.getTime())) {
+        throw new BadRequestException('loggedAt inválido');
+      }
+      loggedAt = parsed;
+    }
+
+    const existingUnlock = await this.prisma.userDrinkUnlock.findUnique({
+      where: { userId_drinkId: { userId, drinkId: drink.id } },
+    });
+    const isFirstTimeForDrink = !existingUnlock;
+
+    const xpEarned = isFirstTimeForDrink
+      ? Math.max(0, drink.xpReward)
+      : XP_REPEAT_REGISTER;
+
+    const { entry, totalXp } = await this.prisma.$transaction(async (tx) => {
+      if (isFirstTimeForDrink) {
+        await tx.userDrinkUnlock.create({
+          data: {
+            userId,
+            drinkId: drink.id,
+            barId: dto.barId ?? null,
+            xpEarned,
+          },
+        });
+      }
+
+      const entry = await tx.drinkHistoryEntry.create({
+        data: {
+          userId,
+          drinkId: drink.id,
+          barId: dto.barId ?? null,
+          rating: dto.rating ?? null,
+          notes: dto.notes?.trim() || null,
+          loggedAt,
+        },
+        include: { drink: true },
+      });
+
+      const user = await tx.user.update({
+        where: { id: userId },
+        data: { totalXp: { increment: xpEarned } },
+        select: { totalXp: true },
+      });
+
+      return { entry, totalXp: user.totalXp };
+    });
+
+    if (isFirstTimeForDrink) {
+      await this.missions.onQrUnlock(userId);
+    }
+
+    return {
+      entry,
+      xpEarned,
+      totalXp,
+      isFirstTimeForDrink,
+    };
+  }
+
   async unlocks(userId: string) {
     const rows = await this.prisma.userDrinkUnlock.findMany({
       where: { userId },
@@ -107,9 +206,7 @@ export class DrinksService {
         venueLabel: isSpecial ? (bar?.businessName ?? null) : null,
         venueLogoUrl,
         venueBannerUrl,
-        venueImageUrl: isSpecial
-          ? (venueBannerUrl ?? venueLogoUrl)
-          : null,
+        venueImageUrl: isSpecial ? (venueBannerUrl ?? venueLogoUrl) : null,
         funFact: isSpecial ? row.drink.description : null,
         recipe: isSpecial ? row.drink.ingredients : null,
       };

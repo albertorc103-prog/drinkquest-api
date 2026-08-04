@@ -1,8 +1,17 @@
-import { Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
+import { CreateDrinkHistoryDto } from './dto/create-drink-history.dto';
 import { DrinksQueryDto } from './dto/drinks-query.dto';
 import { DrinksService } from './drinks.service';
 
@@ -46,6 +55,13 @@ export class DrinksController {
   @ApiBearerAuth()
   history(@CurrentUser() user: JwtPayload, @Query('page') page?: string) {
     return this.drinks.history(user.sub, parseInt(page ?? '1', 10));
+  }
+
+  @Post('me/history')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  logHistory(@CurrentUser() user: JwtPayload, @Body() body: CreateDrinkHistoryDto) {
+    return this.drinks.logHistory(user.sub, body);
   }
 
   @Get('me/unlocks')
