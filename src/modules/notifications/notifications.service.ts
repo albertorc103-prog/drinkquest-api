@@ -1,7 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { NotificationType, Prisma, Role } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { RealtimeHub } from '../../common/realtime/realtime-hub.service';
+import { FcmService } from './fcm.service';
 
 const NEWS_COCKTAIL_TYPES: NotificationType[] = [
   NotificationType.SPECIAL_DRINK_PUBLISHED,
@@ -11,12 +12,55 @@ const NEWS_PROMO_TYPES: NotificationType[] = [
   NotificationType.PROMOTION_PUBLISHED,
 ];
 
+const NEWS_ROOFTOP_TYPES: NotificationType[] = [
+  NotificationType.ROOFTOP_PACKAGE_PUBLISHED,
+];
+
+export type NewsNotificationCategory = 'cocktails' | 'promotions' | 'rooftop';
+
+function typesForNewsCategory(category: NewsNotificationCategory): NotificationType[] {
+  switch (category) {
+    case 'cocktails':
+      return NEWS_COCKTAIL_TYPES;
+    case 'promotions':
+      return NEWS_PROMO_TYPES;
+    case 'rooftop':
+      return NEWS_ROOFTOP_TYPES;
+  }
+}
+
 @Injectable()
 export class NotificationsService {
+  private readonly logger = new Logger(NotificationsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeHub,
+    private readonly fcm: FcmService,
   ) {}
+
+  async registerDeviceToken(userId: string, token: string, platform = 'android') {
+    const trimmed = token.trim();
+    const existing = await this.prisma.deviceToken.findUnique({
+      where: { token: trimmed },
+    });
+    if (existing) {
+      return this.prisma.deviceToken.update({
+        where: { token: trimmed },
+        data: { userId, platform },
+      });
+    }
+    return this.prisma.deviceToken.create({
+      data: { userId, token: trimmed, platform },
+    });
+  }
+
+  async unregisterDeviceToken(userId: string, token: string) {
+    await this.prisma.deviceToken.deleteMany({
+      where: { userId, token: token.trim() },
+    });
+    return { ok: true };
+  }
 
   async create(
     userId: string,
@@ -31,6 +75,7 @@ export class NotificationsService {
     this.realtime.emitToUser(userId, 'notification', row);
     const summary = await this.messengerSummary(userId);
     this.realtime.emitToUser(userId, 'messenger_summary', summary);
+    void this.pushSafe(userId, title, body, type, payload);
     return row;
   }
 
@@ -64,6 +109,12 @@ export class NotificationsService {
       for (const u of chunk) {
         this.realtime.emitToUser(u.id, 'notification', { type, title, body });
       }
+      void this.fcm.sendToUsers(
+        chunk.map((u) => u.id),
+        title,
+        body,
+        this.fcmData(type, payload),
+      );
     }
     return { created };
   }
@@ -104,18 +155,20 @@ export class NotificationsService {
     });
   }
 
-  /** Contadores de no leídas para badges de Noticias (Cócteles / Promos). */
   async unreadByCategory(userId: string) {
-    const [cocktails, promotions, total] = await Promise.all([
+    const [cocktails, promotions, rooftop, total] = await Promise.all([
       this.prisma.notification.count({
         where: { userId, readAt: null, type: { in: NEWS_COCKTAIL_TYPES } },
       }),
       this.prisma.notification.count({
         where: { userId, readAt: null, type: { in: NEWS_PROMO_TYPES } },
       }),
+      this.prisma.notification.count({
+        where: { userId, readAt: null, type: { in: NEWS_ROOFTOP_TYPES } },
+      }),
       this.unreadCount(userId),
     ]);
-    return { cocktails, promotions, total };
+    return { cocktails, promotions, rooftop, total };
   }
 
   async markRead(userId: string, notificationId: string) {
@@ -140,17 +193,47 @@ export class NotificationsService {
     return { ok: true };
   }
 
-  /** Marca leídas las notificaciones de una categoría de noticias. */
-  async markCategoryRead(userId: string, category: 'cocktails' | 'promotions') {
-    const types =
-      category === 'cocktails' ? NEWS_COCKTAIL_TYPES : NEWS_PROMO_TYPES;
-    await this.prisma.notification.updateMany({
-      where: { userId, readAt: null, type: { in: types } },
-      data: { readAt: new Date() },
-    });
-    const summary = await this.messengerSummary(userId);
-    this.realtime.emitToUser(userId, 'messenger_summary', summary);
+  async markCategoryRead(userId: string, category: NewsNotificationCategory) {
+    const types = typesForNewsCategory(category);
+    if (types.length > 0) {
+      await this.prisma.notification.updateMany({
+        where: { userId, readAt: null, type: { in: types } },
+        data: { readAt: new Date() },
+      });
+      const summary = await this.messengerSummary(userId);
+      this.realtime.emitToUser(userId, 'messenger_summary', summary);
+    }
     return this.unreadByCategory(userId);
+  }
+
+  private async pushSafe(
+    userId: string,
+    title: string,
+    body: string | undefined,
+    type: NotificationType,
+    payload?: Prisma.InputJsonValue,
+  ) {
+    try {
+      await this.fcm.sendToUser(userId, title, body, this.fcmData(type, payload));
+    } catch (err) {
+      this.logger.warn(
+        `Push FCM omitido: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  private fcmData(
+    type: NotificationType,
+    payload?: Prisma.InputJsonValue,
+  ): Record<string, string> {
+    const data: Record<string, string> = { type: String(type) };
+    if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+      for (const [k, v] of Object.entries(payload as Record<string, unknown>)) {
+        if (v == null) continue;
+        data[k] = typeof v === 'string' ? v : JSON.stringify(v);
+      }
+    }
+    return data;
   }
 
   private async messengerSummary(userId: string) {

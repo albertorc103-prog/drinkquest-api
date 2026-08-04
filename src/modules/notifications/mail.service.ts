@@ -115,13 +115,18 @@ export class MailService implements OnModuleInit {
 
   /** Motivo legible para /health (sin secretos). */
   getMailStatusDetail(): string {
-    if (!this.isMailEnabled()) return 'MAIL_ENABLED is not true';
+    const from = this.getFromAddress();
+    if (!this.isMailEnabled()) {
+      return `MAIL_ENABLED is not true; from=${from}`;
+    }
     if (this.brevoApiKey) {
       const prefixOk = this.brevoApiKey.startsWith('xkeysib-');
-      return `brevo_api_key_present; prefix_ok=${prefixOk}; len=${this.brevoApiKey.length}`;
+      return (
+        `brevo_api_key_present; prefix_ok=${prefixOk}; len=${this.brevoApiKey.length}; from=${from}`
+      );
     }
-    if (this.transporter) return 'smtp_transporter_present';
-    return 'missing BREVO_API_KEY and SMTP';
+    if (this.transporter) return `smtp_transporter_present; from=${from}`;
+    return `missing BREVO_API_KEY and SMTP; from=${from}`;
   }
 
   private getFromAddress(): string {
@@ -278,7 +283,10 @@ export class MailService implements OnModuleInit {
         `Brevo API send failed (${to}, ${subject}): HTTP ${res.status} ${body}. ` +
           `Revisa BREVO_API_KEY y que SMTP_FROM=${senderEmail} esté verificado en Brevo → Remitentes.`,
       );
-      throw new Error(`Brevo API HTTP ${res.status}`);
+      const hint = body.slice(0, 180).replace(/\s+/g, ' ');
+      throw new Error(
+        `Brevo rechazó el envío (HTTP ${res.status}) con From=${senderEmail}. ${hint}`,
+      );
     }
     const data = (await res.json().catch(() => ({}))) as { messageId?: string };
     this.logger.log(`Brevo API sent to ${to} (${subject}) id=${data.messageId ?? 'n/a'}`);

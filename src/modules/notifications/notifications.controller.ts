@@ -1,8 +1,12 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
+import {
+  RegisterDeviceTokenDto,
+  UnregisterDeviceTokenDto,
+} from './dto/device-token.dto';
 import { NotificationsService } from './notifications.service';
 
 @ApiTags('notifications')
@@ -27,6 +31,26 @@ export class NotificationsController {
     return this.notifications.unreadByCategory(user.sub);
   }
 
+  @Post('device-tokens')
+  registerDeviceToken(
+    @CurrentUser() user: JwtPayload,
+    @Body() body: RegisterDeviceTokenDto,
+  ) {
+    return this.notifications.registerDeviceToken(
+      user.sub,
+      body.token,
+      body.platform ?? 'android',
+    );
+  }
+
+  @Delete('device-tokens')
+  unregisterDeviceToken(
+    @CurrentUser() user: JwtPayload,
+    @Body() body: UnregisterDeviceTokenDto,
+  ) {
+    return this.notifications.unregisterDeviceToken(user.sub, body.token);
+  }
+
   @Patch(':id/read')
   markRead(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.notifications.markRead(user.sub, id);
@@ -43,7 +67,17 @@ export class NotificationsController {
     @Body() body: { category?: string },
   ) {
     const raw = String(body?.category ?? '').toLowerCase();
-    const category = raw === 'promotions' || raw === 'promos' ? 'promotions' : 'cocktails';
+    const category =
+      raw === 'promotions' || raw === 'promos'
+        ? 'promotions'
+        : raw === 'rooftop'
+          ? 'rooftop'
+          : raw === 'cocktails' || raw === 'cocktail'
+            ? 'cocktails'
+            : null;
+    if (!category) {
+      return this.notifications.unreadByCategory(user.sub);
+    }
     return this.notifications.markCategoryRead(user.sub, category);
   }
 }

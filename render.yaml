@@ -91,6 +91,9 @@ services:
         sync: false
       - key: STRIPE_CHECKOUT_CANCEL_URL
         sync: false
+      # ─── FCM (JSON service account en una línea) ───
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        sync: false
       # ─── Admin seed ───
       - key: SEED_ADMIN_EMAIL
         sync: false
