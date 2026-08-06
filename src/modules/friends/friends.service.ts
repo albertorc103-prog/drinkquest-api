@@ -168,11 +168,33 @@ export class FriendsService {
   }
 
   async block(initiatorId: string, targetId: string) {
-    await this.prisma.userBlock.upsert({
-      where: { initiatorId_targetId: { initiatorId, targetId } },
-      create: { initiatorId, targetId },
-      update: {},
-    });
+    if (initiatorId === targetId) {
+      throw new BadRequestException('No puedes bloquearte a ti mismo');
+    }
+    const [userAId, userBId] =
+      initiatorId < targetId ? [initiatorId, targetId] : [targetId, initiatorId];
+    await this.prisma.$transaction([
+      this.prisma.userBlock.upsert({
+        where: { initiatorId_targetId: { initiatorId, targetId } },
+        create: { initiatorId, targetId },
+        update: {},
+      }),
+      this.prisma.friendship.deleteMany({
+        where: { userAId, userBId },
+      }),
+      this.prisma.friendRequest.updateMany({
+        where: {
+          status: FriendRequestStatus.PENDING,
+          OR: [
+            { senderId: initiatorId, receiverId: targetId },
+            { senderId: targetId, receiverId: initiatorId },
+          ],
+        },
+        data: { status: FriendRequestStatus.CANCELLED },
+      }),
+    ]);
+    await this.pushSummary(initiatorId);
+    await this.pushSummary(targetId);
     return { blocked: true };
   }
 
