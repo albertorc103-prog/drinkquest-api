@@ -14,6 +14,10 @@ import { MissionsService } from '../missions/missions.service';
 import { BarMissionsService } from '../bar-missions/bar-missions.service';
 import { GlobalEventsService } from '../global-events/global-events.service';
 import { BarAccessService } from '../subscriptions/bar-access.service';
+import {
+  normalizeSubscriptionPlan,
+  shapeAnalyticsForPlan,
+} from '../subscriptions/subscription-plan.util';
 import { FeedService } from '../feed/feed.service';
 
 export interface QrPayloadResponse {
@@ -266,6 +270,12 @@ export class QrService {
   }
 
   async analytics(barId: string) {
+    const subscription = await this.prisma.barSubscription.findUnique({
+      where: { barId },
+      select: { plan: true },
+    });
+    const plan = normalizeSubscriptionPlan(subscription?.plan);
+
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
     const startOfYesterday = new Date(startOfDay);
@@ -320,19 +330,22 @@ export class QrService {
     }
     const returningUsers = Math.max(0, uniqueUsers - newUsers);
 
-    return {
-      unlocksToday: today.length,
-      unlocksYesterday: yesterday.length,
-      mostPopularDrink: top?.[0] ?? '—',
-      uniqueUsers,
-      totalScans: used.length,
-      weeklyActivity,
-      topDrinks: topEntries.slice(0, 8).map(([name, count]) => ({ name, count })),
-      peakHours,
-      newUsers,
-      returningUsers,
-      updatedAt: new Date().toISOString(),
-    };
+    return shapeAnalyticsForPlan(
+      {
+        unlocksToday: today.length,
+        unlocksYesterday: yesterday.length,
+        mostPopularDrink: top?.[0] ?? '—',
+        uniqueUsers,
+        totalScans: used.length,
+        weeklyActivity,
+        topDrinks: topEntries.slice(0, 8).map(([name, count]) => ({ name, count })),
+        peakHours,
+        newUsers,
+        returningUsers,
+        updatedAt: new Date().toISOString(),
+      },
+      plan,
+    );
   }
 
   private async markExpired(sessionId: string) {

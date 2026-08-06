@@ -198,9 +198,73 @@ export function featuredMapBoostForPlan(plan: SubscriptionPlan): boolean {
   return normalizeSubscriptionPlan(plan) === SubscriptionPlan.LEGEND;
 }
 
-/** Dashboard con gráficas avanzadas: solo Legend. */
+/**
+ * Tendencias 7 días + top bebidas: Intermedio y Legend.
+ * Explorer solo recibe KPIs del día.
+ */
+export function analyticsTrendsEnabledForPlan(plan: SubscriptionPlan): boolean {
+  return normalizeSubscriptionPlan(plan) !== SubscriptionPlan.EXPLORER;
+}
+
+/** Horas pico: Intermedio y Legend. */
+export function analyticsPeakHoursEnabledForPlan(plan: SubscriptionPlan): boolean {
+  return normalizeSubscriptionPlan(plan) !== SubscriptionPlan.EXPLORER;
+}
+
+/**
+ * Audiencia (nuevos/recurrentes), engagement y ranking completo: solo Legend.
+ * Intermedio recibe top 3 bebidas; Legend top 8.
+ */
 export function advancedAnalyticsEnabledForPlan(plan: SubscriptionPlan): boolean {
   return normalizeSubscriptionPlan(plan) === SubscriptionPlan.LEGEND;
+}
+
+export type BarAnalyticsPayload = {
+  unlocksToday: number;
+  unlocksYesterday: number;
+  mostPopularDrink: string;
+  uniqueUsers: number;
+  totalScans: number;
+  weeklyActivity: number[];
+  topDrinks: Array<{ name: string; count: number }>;
+  peakHours: number[];
+  newUsers: number;
+  returningUsers: number;
+  updatedAt: string;
+  planTier: 'basic' | 'trends' | 'advanced';
+};
+
+/** Recorta campos premium según el plan (enforcement servidor). */
+export function shapeAnalyticsForPlan(
+  raw: Omit<BarAnalyticsPayload, 'planTier'>,
+  plan: SubscriptionPlan,
+): BarAnalyticsPayload {
+  const normalized = normalizeSubscriptionPlan(plan);
+  const trends = analyticsTrendsEnabledForPlan(normalized);
+  const peakHours = analyticsPeakHoursEnabledForPlan(normalized);
+  const advanced = advancedAnalyticsEnabledForPlan(normalized);
+
+  if (!trends) {
+    return {
+      ...raw,
+      weeklyActivity: Array.from({ length: 7 }, () => 0),
+      topDrinks: [],
+      peakHours: Array.from({ length: 24 }, () => 0),
+      newUsers: 0,
+      returningUsers: 0,
+      planTier: 'basic',
+    };
+  }
+
+  return {
+    ...raw,
+    weeklyActivity: raw.weeklyActivity,
+    topDrinks: raw.topDrinks.slice(0, advanced ? 8 : 3),
+    peakHours: peakHours ? raw.peakHours : Array.from({ length: 24 }, () => 0),
+    newUsers: advanced ? raw.newUsers : 0,
+    returningUsers: advanced ? raw.returningUsers : 0,
+    planTier: advanced ? 'advanced' : 'trends',
+  };
 }
 
 /** Eventos publicitarios del lugar: solo Legend. */

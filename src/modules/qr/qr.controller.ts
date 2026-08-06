@@ -71,6 +71,7 @@ export class QrController {
         newUsers: 0,
         returningUsers: 0,
         updatedAt: new Date().toISOString(),
+        planTier: 'basic' as const,
       };
     }
     return this.qr.analytics(bar.id);
