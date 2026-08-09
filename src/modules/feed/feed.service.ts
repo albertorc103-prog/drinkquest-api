@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { FeedPostType, NotificationType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -100,9 +105,28 @@ export class FeedService {
       .slice(0, limit);
   }
 
+  /**
+   * Soft-delete: marca deletedAt. Solo el autor.
+   * Rutas: DELETE /feed/posts/:id y POST /feed/posts/:id/delete
+   */
+  async softDeletePost(postId: string, userId: string) {
+    const post = await this.prisma.feedPost.findFirst({
+      where: { id: postId, deletedAt: null },
+    });
+    if (!post) throw new NotFoundException('Publicación no encontrada');
+    if (post.authorId !== userId) {
+      throw new ForbiddenException('Solo puedes eliminar tus propias publicaciones');
+    }
+    await this.prisma.feedPost.update({
+      where: { id: postId },
+      data: { deletedAt: new Date() },
+    });
+    return { deleted: true as const };
+  }
+
   async like(postId: string, userId: string) {
     const post = await this.prisma.feedPost.findUnique({ where: { id: postId } });
-    if (!post) throw new NotFoundException();
+    if (!post || post.deletedAt) throw new NotFoundException();
     const existing = await this.prisma.postLike.findUnique({
       where: { postId_userId: { postId, userId } },
     });
@@ -136,7 +160,7 @@ export class FeedService {
 
   async comment(postId: string, authorId: string, body: string) {
     const post = await this.prisma.feedPost.findUnique({ where: { id: postId } });
-    if (!post) throw new NotFoundException();
+    if (!post || post.deletedAt) throw new NotFoundException();
     const text = body?.trim();
     if (!text) throw new BadRequestException('Comentario vacío');
     const comment = await this.prisma.postComment.create({
@@ -156,6 +180,10 @@ export class FeedService {
   }
 
   async share(postId: string) {
+    const post = await this.prisma.feedPost.findFirst({
+      where: { id: postId, deletedAt: null },
+    });
+    if (!post) throw new NotFoundException('Publicación no encontrada');
     return this.prisma.feedPost.update({
       where: { id: postId },
       data: { shareCount: { increment: 1 } },

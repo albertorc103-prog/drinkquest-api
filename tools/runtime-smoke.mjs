@@ -127,6 +127,34 @@ async function main() {
   const hasRejected = feed.json.items.some((p) => p.approvalStatus !== 'APPROVED');
   assert(!hasRejected, 'Feed incluyó promociones no aprobadas');
 
+  // 4b) Social feed: crear + eliminar (POST /feed/posts/:id/delete)
+  // Acepta 200 o 201 en create (según versión Nest / interceptor).
+  const socialCreateRes = await fetch(`${BASE}/feed/posts`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${userTokens.accessToken}`,
+    },
+    body: JSON.stringify({ body: `Smoke delete ${Date.now()}` }),
+  });
+  const socialCreateJson = await socialCreateRes.json().catch(() => null);
+  assert(
+    socialCreateRes.status === 200 || socialCreateRes.status === 201,
+    `Create feed post expected 200/201 got ${socialCreateRes.status} -> ${JSON.stringify(socialCreateJson)}`,
+  );
+  assert(socialCreateJson?.id, 'Create feed post sin id');
+  const socialDelete = await req(`/feed/posts/${socialCreateJson.id}/delete`, {
+    method: 'POST',
+    token: userTokens.accessToken,
+    expected: 200,
+  });
+  assert(socialDelete.json?.deleted === true, 'Delete feed post no devolvió deleted:true');
+  await req(`/feed/posts/${socialCreateJson.id}/delete`, {
+    method: 'POST',
+    token: userTokens.accessToken,
+    expected: 404,
+  });
+
   // 5) Analytics tracking + append-only
   const promoId = feed.json.items[0]?.id ?? approved.id;
   assert(promoId, 'No hay promo para analytics');

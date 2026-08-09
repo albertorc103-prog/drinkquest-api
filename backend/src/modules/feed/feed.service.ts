@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { NotificationType } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -23,7 +28,22 @@ export class FeedService {
     });
   }
 
-  async feed(page = 1, limit = 20) {
+  async softDeletePost(postId: string, userId: string) {
+    const post = await this.prisma.feedPost.findFirst({
+      where: { id: postId, deletedAt: null },
+    });
+    if (!post) throw new NotFoundException('Publicación no encontrada');
+    if (post.authorId !== userId) {
+      throw new ForbiddenException('Solo puedes eliminar tus propias publicaciones');
+    }
+    await this.prisma.feedPost.update({
+      where: { id: postId },
+      data: { deletedAt: new Date() },
+    });
+    return { deleted: true };
+  }
+
+  async feed(page = 1, limit = 20, _viewerId?: string) {
     const skip = (page - 1) * limit;
     const [items, total] = await Promise.all([
       this.prisma.feedPost.findMany({
