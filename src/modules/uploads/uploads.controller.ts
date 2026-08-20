@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { StorageService } from './storage.service';
 
@@ -27,6 +28,7 @@ function assertUploadFolder(folder: string): UploadFolder {
 
 @ApiTags('uploads')
 @ApiBearerAuth()
+@SkipThrottle()
 @UseGuards(JwtAuthGuard)
 @Controller('uploads')
 export class UploadsController {

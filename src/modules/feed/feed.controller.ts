@@ -12,12 +12,14 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { FeedService } from './feed.service';
 
 @ApiTags('feed')
+@SkipThrottle()
 @Controller('feed')
 export class FeedController {
   constructor(private readonly feed: FeedService) {}

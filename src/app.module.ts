@@ -46,8 +46,9 @@ import { SocketsModule } from './sockets/sockets.module';
       inject: [],
       useFactory: () => [
         {
+          // La app móvil hace muchas lecturas concurrentes (home + feed + notificaciones).
           ttl: parseInt(process.env.THROTTLE_TTL_MS ?? '60000', 10),
-          limit: parseInt(process.env.THROTTLE_LIMIT ?? '120', 10),
+          limit: parseInt(process.env.THROTTLE_LIMIT ?? '300', 10),
         },
       ],
     }),
