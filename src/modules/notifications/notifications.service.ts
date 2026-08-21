@@ -79,6 +79,28 @@ export class NotificationsService {
     return row;
   }
 
+  /** Push FCM sin guardar ni refrescar el inbox (p. ej. mensajes de chat). */
+  async pushOnly(
+    userId: string,
+    type: NotificationType,
+    title: string,
+    body?: string,
+    payload?: Prisma.InputJsonValue,
+    options?: { emitInboxEvent?: boolean },
+  ) {
+    if (options?.emitInboxEvent) {
+      this.realtime.emitToUser(userId, 'notification', {
+        type,
+        title,
+        body,
+        ...(payload && typeof payload === 'object' && !Array.isArray(payload)
+          ? (payload as Record<string, unknown>)
+          : {}),
+      });
+    }
+    void this.pushSafe(userId, title, body, type, payload);
+  }
+
   /** Fan-out a todos los usuarios finales (Role.USER). */
   async notifyAllUsers(
     type: NotificationType,

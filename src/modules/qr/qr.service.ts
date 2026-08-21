@@ -228,7 +228,6 @@ export class QrService {
         businessName: session.bar.businessName,
         xpEarned: xp,
       },
-      session.drink.imageUrl,
     );
 
     this.logger.log(
