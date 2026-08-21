@@ -171,10 +171,25 @@ export class FriendsService {
         },
       },
     });
-    const peers = rows.map((f) => (f.userAId === userId ? f.userA : f.userB));
-    if (peers.length === 0) return [];
 
-    const ids = peers.map((p) => p.id);
+    // Limpia amistades corruptas (mismo usuario en ambos lados).
+    const selfRows = rows.filter((f) => f.userAId === f.userBId);
+    if (selfRows.length > 0) {
+      await this.prisma.friendship.deleteMany({
+        where: { id: { in: selfRows.map((r) => r.id) } },
+      });
+    }
+
+    const peers = rows
+      .filter((f) => f.userAId !== f.userBId)
+      .map((f) => (f.userAId === userId ? f.userB : f.userA))
+      .filter((p): p is NonNullable<typeof p> => !!p && p.id !== userId);
+
+    // Deduplicar por si hay filas duplicadas históricas.
+    const uniquePeers = Array.from(new Map(peers.map((p) => [p.id, p])).values());
+    if (uniquePeers.length === 0) return [];
+
+    const ids = uniquePeers.map((p) => p.id);
     const weekAgo = new Date();
     weekAgo.setDate(weekAgo.getDate() - 7);
 
@@ -194,7 +209,7 @@ export class FriendsService {
     const drinkByUser = new Map(drinkCounts.map((r) => [r.userId, r._count._all]));
     const weeklyByUser = new Map(weeklyUnlocks.map((r) => [r.userId, r._count._all]));
 
-    return peers.map((p) => ({
+    return uniquePeers.map((p) => ({
       id: p.id,
       displayName: p.displayName,
       avatarUrl: p.avatarUrl,
@@ -282,6 +297,7 @@ export class FriendsService {
   }
 
   async areFriends(userA: string, userB: string): Promise<boolean> {
+    if (!userA || !userB || userA === userB) return false;
     const [a, b] = userA < userB ? [userA, userB] : [userB, userA];
     const f = await this.prisma.friendship.findUnique({
       where: { userAId_userBId: { userAId: a, userBId: b } },

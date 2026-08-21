@@ -23,6 +23,9 @@ export class ChatService {
   }
 
   async getOrCreateRoom(userId: string, friendId: string) {
+    if (userId === friendId) {
+      throw new ForbiddenException('No puedes chatear contigo mismo');
+    }
     if (!(await this.friends.areFriends(userId, friendId))) {
       throw new ForbiddenException('Solo puedes chatear con amigos');
     }
@@ -113,7 +116,7 @@ export class ChatService {
       // Entrega por usuario: llega aunque el cliente no haya hecho join_room en esa sala.
       this.realtime.emitToUser(p.userId, 'message', payload);
       if (p.userId === senderId) continue;
-      await this.notifications.create(
+      await this.notifications.pushOnly(
         p.userId,
         NotificationType.CHAT_MESSAGE,
         `Mensaje de ${senderName}`,
@@ -122,13 +125,6 @@ export class ChatService {
       );
       const summary = await this.getSummary(p.userId);
       this.realtime.emitToUser(p.userId, 'messenger_summary', summary);
-      this.realtime.emitToUser(p.userId, 'notification', {
-        type: NotificationType.CHAT_MESSAGE,
-        title: `Mensaje de ${senderName}`,
-        body: preview,
-        roomId,
-        messageId: message.id,
-      });
     }
   }
 
