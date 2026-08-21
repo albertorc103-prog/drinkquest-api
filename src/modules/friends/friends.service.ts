@@ -146,9 +146,65 @@ export class FriendsService {
   async listFriends(userId: string) {
     const rows = await this.prisma.friendship.findMany({
       where: { OR: [{ userAId: userId }, { userBId: userId }] },
-      include: { userA: true, userB: true },
+      include: {
+        userA: {
+          select: {
+            id: true,
+            displayName: true,
+            avatarUrl: true,
+            isOnline: true,
+            lastSeenAt: true,
+            level: true,
+            totalXp: true,
+          },
+        },
+        userB: {
+          select: {
+            id: true,
+            displayName: true,
+            avatarUrl: true,
+            isOnline: true,
+            lastSeenAt: true,
+            level: true,
+            totalXp: true,
+          },
+        },
+      },
     });
-    return rows.map((f) => (f.userAId === userId ? f.userB : f.userA));
+    const peers = rows.map((f) => (f.userAId === userId ? f.userA : f.userB));
+    if (peers.length === 0) return [];
+
+    const ids = peers.map((p) => p.id);
+    const weekAgo = new Date();
+    weekAgo.setDate(weekAgo.getDate() - 7);
+
+    const [drinkCounts, weeklyUnlocks] = await Promise.all([
+      this.prisma.userDrinkUnlock.groupBy({
+        by: ['userId'],
+        where: { userId: { in: ids } },
+        _count: { _all: true },
+      }),
+      this.prisma.userDrinkUnlock.groupBy({
+        by: ['userId'],
+        where: { userId: { in: ids }, unlockedAt: { gte: weekAgo } },
+        _count: { _all: true },
+      }),
+    ]);
+
+    const drinkByUser = new Map(drinkCounts.map((r) => [r.userId, r._count._all]));
+    const weeklyByUser = new Map(weeklyUnlocks.map((r) => [r.userId, r._count._all]));
+
+    return peers.map((p) => ({
+      id: p.id,
+      displayName: p.displayName,
+      avatarUrl: p.avatarUrl,
+      isOnline: p.isOnline,
+      lastSeenAt: p.lastSeenAt?.toISOString() ?? null,
+      level: p.level,
+      totalXp: p.totalXp,
+      drinkCount: drinkByUser.get(p.id) ?? 0,
+      weeklyUnlocks: weeklyByUser.get(p.id) ?? 0,
+    }));
   }
 
   async pendingRequests(userId: string) {
@@ -165,6 +221,33 @@ export class FriendsService {
       include: { receiver: { select: { id: true, displayName: true, avatarUrl: true } } },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  async removeFriend(userId: string, friendId: string) {
+    if (userId === friendId) {
+      throw new BadRequestException('No puedes eliminarte a ti mismo');
+    }
+    const [userAId, userBId] =
+      userId < friendId ? [userId, friendId] : [friendId, userId];
+    const deleted = await this.prisma.friendship.deleteMany({
+      where: { userAId, userBId },
+    });
+    if (deleted.count === 0) {
+      throw new BadRequestException('No sois amigos');
+    }
+    await this.prisma.friendRequest.updateMany({
+      where: {
+        status: FriendRequestStatus.PENDING,
+        OR: [
+          { senderId: userId, receiverId: friendId },
+          { senderId: friendId, receiverId: userId },
+        ],
+      },
+      data: { status: FriendRequestStatus.CANCELLED },
+    });
+    await this.pushSummary(userId);
+    await this.pushSummary(friendId);
+    return { removed: true };
   }
 
   async block(initiatorId: string, targetId: string) {

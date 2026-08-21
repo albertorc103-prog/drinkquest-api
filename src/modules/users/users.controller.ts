@@ -1,10 +1,10 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { ProfileVisibility } from '@prisma/client';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { SyncGamificationDto } from './dto/user-gamification.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UsersService } from './users.service';
 
 @ApiTags('users')
@@ -16,16 +16,13 @@ export class UsersController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   me(@CurrentUser() user: JwtPayload) {
-    return this.users.getProfile(user.sub, user.sub);
+    return this.users.getOwnProfileWithProgress(user.sub);
   }
 
   @Patch('me')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  update(
-    @CurrentUser() user: JwtPayload,
-    @Body() body: { displayName?: string; bio?: string; profileVisibility?: ProfileVisibility },
-  ) {
+  update(@CurrentUser() user: JwtPayload, @Body() body: UpdateProfileDto) {
     return this.users.updateProfile(user.sub, body);
   }
 
@@ -48,6 +45,14 @@ export class UsersController {
   @ApiBearerAuth()
   search(@CurrentUser() user: JwtPayload, @Query('q') q: string) {
     return this.users.search(q ?? '', user.sub);
+  }
+
+  /** Perfil social consultable (amigos / público). Ruta estática antes de :id. */
+  @Get('social/:id')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  socialProfile(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.users.getSocialProfile(id, user.sub);
   }
 
   @Get(':id')

@@ -71,6 +71,8 @@ enum NotificationType {
   MISSION_COMPLETE
   FEED_LIKE
   FEED_COMMENT
+  FEED_MENTION
+  FEED_FRIEND_POST
   SYSTEM
   SPECIAL_DRINK_APPROVED
   SPECIAL_DRINK_REJECTED
@@ -283,6 +285,10 @@ model User {
   lastLoginEpochDay Int               @default(0) @map("last_login_epoch_day")
   streakBonusTierClaimed Int          @default(0) @map("streak_bonus_tier_claimed")
   dailyChestClaimedDay Int            @default(0) @map("daily_chest_claimed_day")
+  /** Snapshot catálogo local: missionKey → { progress, completedAt?, xpReward? } */
+  questProgress     Json?             @map("quest_progress")
+  /** Snapshot medallas locales: achievementKey → { progress, unlockedAt?, xpReward? } */
+  achievementProgress Json?           @map("achievement_progress")
   createdAt         DateTime          @default(now()) @map("created_at")
   updatedAt         DateTime          @updatedAt @map("updated_at")
   deletedAt         DateTime?         @map("deleted_at")

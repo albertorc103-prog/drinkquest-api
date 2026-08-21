@@ -1,0 +1,3 @@
+-- AlterEnum
+ALTER TYPE "NotificationType" ADD VALUE 'FEED_MENTION';
+ALTER TYPE "NotificationType" ADD VALUE 'FEED_FRIEND_POST';
