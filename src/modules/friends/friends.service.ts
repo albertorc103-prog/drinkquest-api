@@ -50,6 +50,34 @@ export class FriendsService {
     if (senderId === receiverId) throw new BadRequestException('No puedes agregarte a ti mismo');
     if (await this.isBlocked(senderId, receiverId)) throw new ForbiddenException('Usuario bloqueado');
 
+    // Ya amigos → respuesta estable para el cliente (no error).
+    if (await this.areFriends(senderId, receiverId)) {
+      return {
+        id: 'already-friends',
+        senderId,
+        receiverId,
+        status: FriendRequestStatus.ACCEPTED,
+        message: message ?? null,
+        alreadyFriends: true,
+      };
+    }
+
+    // Si la otra persona ya te envió solicitud, aceptar = quedar amigos al tocar «Agregar».
+    const incoming = await this.prisma.friendRequest.findUnique({
+      where: { senderId_receiverId: { senderId: receiverId, receiverId: senderId } },
+    });
+    if (incoming?.status === FriendRequestStatus.PENDING) {
+      await this.respond(senderId, incoming.id, true);
+      return {
+        id: incoming.id,
+        senderId: incoming.senderId,
+        receiverId: incoming.receiverId,
+        status: FriendRequestStatus.ACCEPTED,
+        message: incoming.message,
+        becameFriends: true,
+      };
+    }
+
     const existing = await this.prisma.friendRequest.findUnique({
       where: { senderId_receiverId: { senderId, receiverId } },
     });
@@ -99,9 +127,18 @@ export class FriendsService {
       ? [req.senderId, req.receiverId]
       : [req.receiverId, req.senderId];
 
-    const [friendship] = await this.prisma.$transaction([
+    await this.prisma.$transaction([
       this.prisma.friendRequest.update({
         where: { id: requestId },
+        data: { status: FriendRequestStatus.ACCEPTED },
+      }),
+      // Cierra la solicitud cruzada pendiente (si ambos se agregaron).
+      this.prisma.friendRequest.updateMany({
+        where: {
+          status: FriendRequestStatus.PENDING,
+          senderId: req.receiverId,
+          receiverId: req.senderId,
+        },
         data: { status: FriendRequestStatus.ACCEPTED },
       }),
       this.prisma.friendship.upsert({
@@ -126,7 +163,14 @@ export class FriendsService {
       requestId,
       notificationId: notif.id,
     });
-    return friendship;
+    // Forma estable para Gson en Android (evita Map con fechas anidadas).
+    return {
+      id: req.id,
+      senderId: req.senderId,
+      receiverId: req.receiverId,
+      status: FriendRequestStatus.ACCEPTED,
+      message: req.message,
+    };
   }
 
   async cancelRequest(senderId: string, requestId: string) {
@@ -193,21 +237,26 @@ export class FriendsService {
     const weekAgo = new Date();
     weekAgo.setDate(weekAgo.getDate() - 7);
 
-    const [drinkCounts, weeklyUnlocks] = await Promise.all([
-      this.prisma.userDrinkUnlock.groupBy({
-        by: ['userId'],
-        where: { userId: { in: ids } },
-        _count: { _all: true },
-      }),
-      this.prisma.userDrinkUnlock.groupBy({
-        by: ['userId'],
-        where: { userId: { in: ids }, unlockedAt: { gte: weekAgo } },
-        _count: { _all: true },
-      }),
-    ]);
-
-    const drinkByUser = new Map(drinkCounts.map((r) => [r.userId, r._count._all]));
-    const weeklyByUser = new Map(weeklyUnlocks.map((r) => [r.userId, r._count._all]));
+    let drinkByUser = new Map<string, number>();
+    let weeklyByUser = new Map<string, number>();
+    try {
+      const [drinkCounts, weeklyUnlocks] = await Promise.all([
+        this.prisma.userDrinkUnlock.groupBy({
+          by: ['userId'],
+          where: { userId: { in: ids } },
+          _count: { _all: true },
+        }),
+        this.prisma.userDrinkUnlock.groupBy({
+          by: ['userId'],
+          where: { userId: { in: ids }, unlockedAt: { gte: weekAgo } },
+          _count: { _all: true },
+        }),
+      ]);
+      drinkByUser = new Map(drinkCounts.map((r) => [r.userId, r._count._all]));
+      weeklyByUser = new Map(weeklyUnlocks.map((r) => [r.userId, r._count._all]));
+    } catch {
+      // No bloquear el listado de amigos si falla el conteo de bebidas.
+    }
 
     return uniquePeers.map((p) => ({
       id: p.id,
