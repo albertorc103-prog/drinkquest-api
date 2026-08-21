@@ -67,8 +67,28 @@ export class StorageService {
   }
 
   private buildObjectKey(folder: string, contentType: string, extension?: string): string {
-    const ext = extension ?? (contentType.includes('png') ? 'png' : 'jpg');
+    const ext = extension ?? this.extensionFromContentType(contentType);
     return `${folder}/${randomUUID()}.${ext}`;
+  }
+
+  private extensionFromContentType(contentType: string): string {
+    const mime = contentType.toLowerCase();
+    if (mime.includes('png')) return 'png';
+    if (mime.includes('webp')) return 'webp';
+    if (mime.includes('ogg')) return 'ogg';
+    if (mime.includes('webm')) return 'webm';
+    if (mime.includes('wav')) return 'wav';
+    if (
+      mime.includes('mpeg') ||
+      mime.includes('mp4') ||
+      mime.includes('m4a') ||
+      mime.includes('aac') ||
+      mime.includes('x-m4a')
+    ) {
+      return 'm4a';
+    }
+    if (mime.includes('jpeg') || mime.includes('jpg')) return 'jpg';
+    return 'bin';
   }
 
   async uploadObject(folder: string, body: Buffer, contentType: string): Promise<{ key: string; publicUrl: string }> {

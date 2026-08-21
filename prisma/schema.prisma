@@ -1090,15 +1090,17 @@ model ChatParticipant {
 }
 
 model ChatMessage {
-  id          String   @id @default(uuid()) @db.Uuid
-  roomId      String   @map("room_id") @db.Uuid
-  senderId    String   @map("sender_id") @db.Uuid
-  body        String?
-  imageUrl    String?  @map("image_url")
-  imageKey    String?  @map("image_key")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
-  deletedAt   DateTime? @map("deleted_at")
+  id               String    @id @default(uuid()) @db.Uuid
+  roomId           String    @map("room_id") @db.Uuid
+  senderId         String    @map("sender_id") @db.Uuid
+  body             String?
+  imageUrl         String?   @map("image_url")
+  imageKey         String?   @map("image_key")
+  audioUrl         String?   @map("audio_url")
+  audioDurationMs  Int?      @map("audio_duration_ms")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  deletedAt        DateTime? @map("deleted_at")
 
   room   ChatRoom      @relation(fields: [roomId], references: [id], onDelete: Cascade)
   sender User          @relation(fields: [senderId], references: [id], onDelete: Cascade)

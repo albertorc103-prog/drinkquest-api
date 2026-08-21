@@ -1,10 +1,17 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+} from '@nestjs/common';
 import { NotificationType } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { RealtimeHub } from '../../common/realtime/realtime-hub.service';
 import { levelFromTotalXp } from '../../common/utils/level-from-xp.util';
 import { NotificationsService } from '../notifications/notifications.service';
 import { FriendsService } from '../friends/friends.service';
+
+/** Duración máxima de notas de voz (ms). */
+export const CHAT_VOICE_MAX_MS = 30_000;
 
 @Injectable()
 export class ChatService {
@@ -52,10 +59,38 @@ export class ChatService {
     });
   }
 
-  async sendMessage(roomId: string, senderId: string, body?: string, imageUrl?: string) {
+  async sendMessage(
+    roomId: string,
+    senderId: string,
+    body?: string,
+    imageUrl?: string,
+    audioUrl?: string,
+    audioDurationMs?: number,
+  ) {
     await this.assertParticipant(roomId, senderId);
+    const trimmedBody = body?.trim() || null;
+    const trimmedImage = imageUrl?.trim() || null;
+    const trimmedAudio = audioUrl?.trim() || null;
+    let duration: number | null = null;
+    if (trimmedAudio) {
+      const ms = Number(audioDurationMs);
+      if (!Number.isFinite(ms) || ms <= 0) {
+        throw new BadRequestException('La nota de voz necesita duración válida');
+      }
+      duration = Math.min(Math.round(ms), CHAT_VOICE_MAX_MS);
+    }
+    if (!trimmedBody && !trimmedImage && !trimmedAudio) {
+      throw new BadRequestException('Mensaje vacío');
+    }
     const message = await this.prisma.chatMessage.create({
-      data: { roomId, senderId, body, imageUrl },
+      data: {
+        roomId,
+        senderId,
+        body: trimmedBody,
+        imageUrl: trimmedImage,
+        audioUrl: trimmedAudio,
+        audioDurationMs: duration,
+      },
       include: {
         sender: { select: { id: true, displayName: true, avatarUrl: true } },
         reads: true,
@@ -72,6 +107,8 @@ export class ChatService {
     senderId: string;
     body: string | null;
     imageUrl: string | null;
+    audioUrl?: string | null;
+    audioDurationMs?: number | null;
     createdAt: Date;
   }) {
     return {
@@ -80,6 +117,8 @@ export class ChatService {
       senderId: message.senderId,
       body: message.body ?? '',
       imageUrl: message.imageUrl,
+      audioUrl: message.audioUrl ?? null,
+      audioDurationMs: message.audioDurationMs ?? null,
       createdAt: message.createdAt.toISOString(),
     };
   }
@@ -101,6 +140,8 @@ export class ChatService {
       senderId: string;
       body: string | null;
       imageUrl: string | null;
+      audioUrl?: string | null;
+      audioDurationMs?: number | null;
       createdAt: Date;
       sender?: { displayName?: string | null };
     },
@@ -110,7 +151,10 @@ export class ChatService {
       where: { roomId },
       select: { userId: true },
     });
-    const preview = message.body?.trim() || '📷 Foto';
+    const preview =
+      message.body?.trim() ||
+      (message.audioUrl ? '🎤 Nota de voz' : null) ||
+      (message.imageUrl ? '📷 Foto' : 'Nuevo mensaje');
     const senderName = message.sender?.displayName ?? 'Alguien';
 
     for (const p of participants) {

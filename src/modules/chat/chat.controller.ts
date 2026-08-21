@@ -40,9 +40,22 @@ export class ChatController {
   async send(
     @CurrentUser() user: JwtPayload,
     @Param('roomId') roomId: string,
-    @Body() body: { body?: string; imageUrl?: string },
+    @Body()
+    body: {
+      body?: string;
+      imageUrl?: string;
+      audioUrl?: string;
+      audioDurationMs?: number;
+    },
   ) {
-    return this.chat.sendMessage(roomId, user.sub, body.body, body.imageUrl);
+    return this.chat.sendMessage(
+      roomId,
+      user.sub,
+      body.body,
+      body.imageUrl,
+      body.audioUrl,
+      body.audioDurationMs,
+    );
   }
 
   @Post('rooms/:roomId/read')

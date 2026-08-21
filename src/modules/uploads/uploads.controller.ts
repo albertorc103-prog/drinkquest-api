@@ -62,12 +62,26 @@ export class UploadsController {
   ) {
     const folder = assertUploadFolder(folderRaw);
     if (!file?.buffer?.length) {
-      throw new BadRequestException('Archivo de imagen requerido (campo file).');
+      throw new BadRequestException('Archivo requerido (campo file).');
     }
-    const contentType = file.mimetype?.startsWith('image/') ? file.mimetype : 'image/jpeg';
-    if (!/^image\/(jpeg|jpg|png|webp)$/i.test(contentType)) {
-      throw new BadRequestException('Solo se permiten imágenes JPEG, PNG o WebP.');
+    const rawMime = (file.mimetype ?? '').toLowerCase();
+    const isImage = /^image\/(jpeg|jpg|png|webp)$/i.test(rawMime);
+    const isAudio =
+      folder === 'chat' &&
+      (/^audio\/(mp4|m4a|aac|mpeg|ogg|webm|x-m4a|wav)$/i.test(rawMime) ||
+        rawMime === 'audio/mp4');
+    if (!isImage && !isAudio) {
+      throw new BadRequestException(
+        folder === 'chat'
+          ? 'Solo imágenes (JPEG/PNG/WebP) o audio (M4A/AAC/OGG/WebM) en chat.'
+          : 'Solo se permiten imágenes JPEG, PNG o WebP.',
+      );
     }
+    const contentType = isAudio
+      ? rawMime || 'audio/mp4'
+      : rawMime.startsWith('image/')
+        ? rawMime
+        : 'image/jpeg';
     const result = await this.storage.uploadObject(folder, file.buffer, contentType);
     this.logger.log(
       JSON.stringify({
