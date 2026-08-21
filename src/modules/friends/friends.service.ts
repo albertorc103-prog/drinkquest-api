@@ -188,6 +188,9 @@ export class FriendsService {
   }
 
   async listFriends(userId: string) {
+    // Recupera amistades que se hayan perdido pero siguen en chats 1:1.
+    await this.repairFriendshipsFromChatRooms(userId);
+
     const rows = await this.prisma.friendship.findMany({
       where: { OR: [{ userAId: userId }, { userBId: userId }] },
       include: {
@@ -269,6 +272,44 @@ export class FriendsService {
       drinkCount: drinkByUser.get(p.id) ?? 0,
       weeklyUnlocks: weeklyByUser.get(p.id) ?? 0,
     }));
+  }
+
+  /**
+   * Si hubo limpiezas agresivas o fallos al aceptar, las salas 1:1 siguen existiendo.
+   * Recrea la fila de friendship para no dejar la lista de amigos vacía.
+   */
+  private async repairFriendshipsFromChatRooms(userId: string) {
+    const participations = await this.prisma.chatParticipant.findMany({
+      where: { userId },
+      select: {
+        room: {
+          select: {
+            participants: { select: { userId: true } },
+          },
+        },
+      },
+    });
+
+    const peerIds = new Set<string>();
+    for (const row of participations) {
+      const ids = row.room.participants.map((p) => p.userId);
+      if (ids.length !== 2) continue;
+      const peerId = ids.find((id) => id !== userId);
+      if (peerId) peerIds.add(peerId);
+    }
+    if (peerIds.size === 0) return;
+
+    await Promise.all(
+      [...peerIds].map(async (peerId) => {
+        const [userAId, userBId] =
+          userId < peerId ? [userId, peerId] : [peerId, userId];
+        await this.prisma.friendship.upsert({
+          where: { userAId_userBId: { userAId, userBId } },
+          create: { userAId, userBId },
+          update: {},
+        });
+      }),
+    );
   }
 
   async pendingRequests(userId: string) {
