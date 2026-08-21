@@ -7,6 +7,7 @@ import { DrinkRarity, Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { MissionsService } from '../missions/missions.service';
 import { CreateDrinkHistoryDto } from './dto/create-drink-history.dto';
+import { levelFromTotalXp } from '../../common/utils/level-from-xp.util';
 
 /** Alineado con XpEngine.XP_REPEAT_REGISTER en la app Android. */
 const XP_REPEAT_REGISTER = 8;
@@ -153,9 +154,14 @@ export class DrinksService {
         include: { drink: true },
       });
 
+      const current = await tx.user.findUnique({
+        where: { id: userId },
+        select: { totalXp: true },
+      });
+      const totalXp = (current?.totalXp ?? 0) + xpEarned;
       const user = await tx.user.update({
         where: { id: userId },
-        data: { totalXp: { increment: xpEarned } },
+        data: { totalXp, level: levelFromTotalXp(totalXp) },
         select: { totalXp: true },
       });
 

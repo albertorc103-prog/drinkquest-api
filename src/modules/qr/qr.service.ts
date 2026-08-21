@@ -19,6 +19,7 @@ import {
   shapeAnalyticsForPlan,
 } from '../subscriptions/subscription-plan.util';
 import { FeedService } from '../feed/feed.service';
+import { levelFromTotalXp } from '../../common/utils/level-from-xp.util';
 
 export interface QrPayloadResponse {
   sessionId: string;
@@ -191,9 +192,14 @@ export class QrService {
       await tx.drinkHistoryEntry.create({
         data: { userId, drinkId: session.drinkId, barId: session.barId },
       });
+      const current = await tx.user.findUnique({
+        where: { id: userId },
+        select: { totalXp: true },
+      });
+      const totalXp = (current?.totalXp ?? 0) + xp;
       return tx.user.update({
         where: { id: userId },
-        data: { totalXp: { increment: xp } },
+        data: { totalXp, level: levelFromTotalXp(totalXp) },
       });
     });
 
@@ -215,10 +221,14 @@ export class QrService {
       {
         drinkId: session.drinkId,
         drinkName: session.drink.name,
+        drinkImageUrl: session.drink.imageUrl,
+        rarity: session.drink.rarity,
+        catalogNumber: session.drink.legacyId,
         barId: session.barId,
         businessName: session.bar.businessName,
         xpEarned: xp,
       },
+      session.drink.imageUrl,
     );
 
     this.logger.log(

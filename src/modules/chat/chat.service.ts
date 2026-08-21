@@ -2,6 +2,7 @@ import { ForbiddenException, Injectable } from '@nestjs/common';
 import { NotificationType } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { RealtimeHub } from '../../common/realtime/realtime-hub.service';
+import { levelFromTotalXp } from '../../common/utils/level-from-xp.util';
 import { NotificationsService } from '../notifications/notifications.service';
 import { FriendsService } from '../friends/friends.service';
 
@@ -205,7 +206,15 @@ export class ChatService {
             participants: {
               include: {
                 user: {
-                  select: { id: true, displayName: true, avatarUrl: true, isOnline: true },
+                  select: {
+                    id: true,
+                    displayName: true,
+                    avatarUrl: true,
+                    isOnline: true,
+                    lastSeenAt: true,
+                    level: true,
+                    totalXp: true,
+                  },
                 },
               },
             },
@@ -233,7 +242,17 @@ export class ChatService {
           : false;
         return {
           roomId: p.roomId,
-          peer,
+          peer: peer
+            ? {
+                id: peer.id,
+                displayName: peer.displayName,
+                avatarUrl: peer.avatarUrl,
+                isOnline: peer.isOnline,
+                lastSeenAt: peer.lastSeenAt?.toISOString() ?? null,
+                level: levelFromTotalXp(peer.totalXp ?? 0),
+                totalXp: peer.totalXp,
+              }
+            : null,
           lastMessage: last,
           unreadCount,
           isOnline: peer?.isOnline ?? false,

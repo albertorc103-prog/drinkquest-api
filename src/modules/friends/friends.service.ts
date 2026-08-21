@@ -3,6 +3,7 @@ import { FriendRequestStatus, NotificationType } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { RealtimeHub } from '../../common/realtime/realtime-hub.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { levelFromTotalXp } from '../../common/utils/level-from-xp.util';
 
 @Injectable()
 export class FriendsService {
@@ -261,17 +262,20 @@ export class FriendsService {
       // No bloquear el listado de amigos si falla el conteo de bebidas.
     }
 
-    return uniquePeers.map((p) => ({
-      id: p.id,
-      displayName: p.displayName,
-      avatarUrl: p.avatarUrl,
-      isOnline: p.isOnline,
-      lastSeenAt: p.lastSeenAt?.toISOString() ?? null,
-      level: p.level,
-      totalXp: p.totalXp,
-      drinkCount: drinkByUser.get(p.id) ?? 0,
-      weeklyUnlocks: weeklyByUser.get(p.id) ?? 0,
-    }));
+    return uniquePeers.map((p) => {
+      const totalXp = p.totalXp ?? 0;
+      return {
+        id: p.id,
+        displayName: p.displayName,
+        avatarUrl: p.avatarUrl,
+        isOnline: p.isOnline,
+        lastSeenAt: p.lastSeenAt?.toISOString() ?? null,
+        level: levelFromTotalXp(totalXp),
+        totalXp,
+        drinkCount: drinkByUser.get(p.id) ?? 0,
+        weeklyUnlocks: weeklyByUser.get(p.id) ?? 0,
+      };
+    });
   }
 
   /**

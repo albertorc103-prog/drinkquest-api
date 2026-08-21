@@ -332,8 +332,17 @@ export class UsersService {
   async setOnline(userId: string, online: boolean) {
     return this.prisma.user.update({
       where: { id: userId },
-      data: { isOnline: online, lastSeenAt: online ? undefined : new Date() },
+      data: {
+        isOnline: online,
+        // Siempre refresca actividad (conexión o desconexión).
+        lastSeenAt: new Date(),
+      },
     });
+  }
+
+  /** Expone el cálculo de nivel para otros módulos (QR, amigos, etc.). */
+  levelFromXp(totalXp: number): number {
+    return this.levelFromTotalXp(totalXp);
   }
 
   /** Día juliano UTC (compatible con java.time.LocalDate.toEpochDay()). */

@@ -1,8 +1,8 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { MissionStatus } from '@prisma/client';
+import { MissionStatus, NotificationType } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { NotificationType } from '@prisma/client';
+import { levelFromTotalXp } from '../../common/utils/level-from-xp.util';
 
 @Injectable()
 export class MissionsService {
@@ -46,9 +46,14 @@ export class MissionsService {
           where: { id: row.id },
           data: { status: MissionStatus.COMPLETED, completedAt: new Date() },
         });
+        const current = await this.prisma.user.findUnique({
+          where: { id: userId },
+          select: { totalXp: true },
+        });
+        const totalXp = (current?.totalXp ?? 0) + mission.xpReward;
         await this.prisma.user.update({
           where: { id: userId },
-          data: { totalXp: { increment: mission.xpReward } },
+          data: { totalXp, level: levelFromTotalXp(totalXp) },
         });
         await this.notifications.create(
           userId,
