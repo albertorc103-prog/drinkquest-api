@@ -22,6 +22,19 @@ import { BarMissionsService } from '../bar-missions/bar-missions.service';
 import { CreateReservationDto } from './dto/reservation.dto';
 import { mapReservation } from './mappers/reservation.mapper';
 
+/** Fecha/hora de reserva en zona México (evita off-by-one con toISOString().slice). */
+function formatReservationWhen(date: Date): string {
+  return new Intl.DateTimeFormat('es-MX', {
+    timeZone: 'America/Mexico_City',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(date);
+}
+
 @Injectable()
 export class ReservationsService {
   constructor(
@@ -124,7 +137,7 @@ export class ReservationsService {
       created.barId,
       NotificationType.RESERVATION_CREATED,
       'Nueva reserva de mesa',
-      `${guestName} · ${dto.partySize} pers. · ${reservedFor.toISOString().slice(0, 10)}`,
+      `${guestName} · ${dto.partySize} pers. · ${formatReservationWhen(reservedFor)}`,
       {
         reservationId: created.id,
         barId: created.barId,
@@ -166,7 +179,7 @@ export class ReservationsService {
       updated.barId,
       NotificationType.RESERVATION_CANCELLED,
       'Reserva cancelada por el usuario',
-      `${updated.guestName} canceló su reserva del ${updated.reservedFor.toISOString().slice(0, 10)}.`,
+      `${updated.guestName} canceló su reserva del ${formatReservationWhen(updated.reservedFor)}.`,
       { reservationId: updated.id, barId: updated.barId },
     );
     return mapReservation(updated);
@@ -230,7 +243,7 @@ export class ReservationsService {
       updated.userId,
       NotificationType.RESERVATION_CONFIRMED,
       'Reserva confirmada',
-      `${updated.bar.businessName} confirmó tu mesa para ${updated.partySize} el ${updated.reservedFor.toISOString().slice(0, 10)}.`,
+      `${updated.bar.businessName} confirmó tu mesa para ${updated.partySize} el ${formatReservationWhen(updated.reservedFor)}.`,
       { reservationId: updated.id, barId: updated.barId, category: 'reservations' },
     );
     await this.barMissions.onReservationConfirmed(
@@ -336,7 +349,7 @@ export class ReservationsService {
       updated.userId,
       NotificationType.RESERVATION_CANCELLED,
       'Reserva cancelada por el local',
-      `${updated.bar.businessName} canceló tu reserva del ${updated.reservedFor.toISOString().slice(0, 10)}.`,
+      `${updated.bar.businessName} canceló tu reserva del ${formatReservationWhen(updated.reservedFor)}.`,
       { reservationId: updated.id, barId: updated.barId, category: 'reservations' },
     );
     return mapReservation(updated);
@@ -353,9 +366,8 @@ export class ReservationsService {
     if (!Number.isFinite(date.getTime())) {
       throw new BadRequestException('Fecha de reserva inválida.');
     }
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
-    if (date < startOfToday) {
+    // Comparar contra "ahora" (no medianoche del servidor UTC), alineado con la app.
+    if (date.getTime() <= Date.now()) {
       throw new BadRequestException('La fecha de reserva no puede ser en el pasado.');
     }
     return date;
