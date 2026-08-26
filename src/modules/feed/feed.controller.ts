@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
+import { FeedPostType } from '@prisma/client';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
@@ -39,8 +40,25 @@ export class FeedController {
   @Post('posts')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  create(@CurrentUser() user: JwtPayload, @Body() body: { body?: string; imageUrl?: string }) {
-    return this.feed.createPost(user.sub, body.body, body.imageUrl);
+  create(
+    @CurrentUser() user: JwtPayload,
+    @Body()
+    body: {
+      body?: string;
+      imageUrl?: string;
+      taggedBarId?: string;
+      taggedUserIds?: string[];
+    },
+  ) {
+    return this.feed.createPost(
+      user.sub,
+      body.body,
+      body.imageUrl,
+      FeedPostType.USER,
+      undefined,
+      body.taggedBarId,
+      body.taggedUserIds,
+    );
   }
 
   @Delete('posts/:id')
@@ -76,6 +94,14 @@ export class FeedController {
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
   ) {
     return this.feed.like(id, user.sub);
+  }
+
+  @Get('posts/:id/likes')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Listar usuarios que dieron Brindis a la publicación' })
+  listLikes(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
+    return this.feed.listLikes(id);
   }
 
   @Get('posts/:id/comments')
