@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -39,5 +39,11 @@ export class UserReservationsController {
   @ApiOperation({ summary: 'Cancelar mi reserva' })
   cancel(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.reservations.cancelByUser(user.sub, id);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Eliminar una reserva cuya fecha ya pasó' })
+  remove(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.reservations.deletePastByUser(user.sub, id);
   }
 }

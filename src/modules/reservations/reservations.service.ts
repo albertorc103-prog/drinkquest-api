@@ -355,6 +355,18 @@ export class ReservationsService {
     return mapReservation(updated);
   }
 
+  /** Elimina del historial una reserva propia cuya fecha/hora ya pasó. */
+  async deletePastByUser(userId: string, reservationId: string) {
+    const row = await this.requireUserReservation(userId, reservationId);
+    if (row.reservedFor.getTime() > Date.now()) {
+      throw new BadRequestException(
+        'Solo puedes eliminar reservas cuya fecha ya pasó.',
+      );
+    }
+    await this.prisma.barReservation.delete({ where: { id: row.id } });
+    return { deleted: true as const };
+  }
+
   private assertPartySize(partySize: number) {
     if (!Number.isInteger(partySize) || partySize < 1 || partySize > 20) {
       throw new BadRequestException('El número de personas debe ser entre 1 y 20.');
