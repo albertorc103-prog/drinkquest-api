@@ -189,9 +189,6 @@ export class FriendsService {
   }
 
   async listFriends(userId: string) {
-    // Recupera amistades que se hayan perdido pero siguen en chats 1:1.
-    await this.repairFriendshipsFromChatRooms(userId);
-
     const rows = await this.prisma.friendship.findMany({
       where: { OR: [{ userAId: userId }, { userBId: userId }] },
       include: {
@@ -278,44 +275,6 @@ export class FriendsService {
     });
   }
 
-  /**
-   * Si hubo limpiezas agresivas o fallos al aceptar, las salas 1:1 siguen existiendo.
-   * Recrea la fila de friendship para no dejar la lista de amigos vacía.
-   */
-  private async repairFriendshipsFromChatRooms(userId: string) {
-    const participations = await this.prisma.chatParticipant.findMany({
-      where: { userId },
-      select: {
-        room: {
-          select: {
-            participants: { select: { userId: true } },
-          },
-        },
-      },
-    });
-
-    const peerIds = new Set<string>();
-    for (const row of participations) {
-      const ids = row.room.participants.map((p) => p.userId);
-      if (ids.length !== 2) continue;
-      const peerId = ids.find((id) => id !== userId);
-      if (peerId) peerIds.add(peerId);
-    }
-    if (peerIds.size === 0) return;
-
-    await Promise.all(
-      [...peerIds].map(async (peerId) => {
-        const [userAId, userBId] =
-          userId < peerId ? [userId, peerId] : [peerId, userId];
-        await this.prisma.friendship.upsert({
-          where: { userAId_userBId: { userAId, userBId } },
-          create: { userAId, userBId },
-          update: {},
-        });
-      }),
-    );
-  }
-
   async pendingRequests(userId: string) {
     return this.prisma.friendRequest.findMany({
       where: { receiverId: userId, status: FriendRequestStatus.PENDING },
@@ -354,6 +313,7 @@ export class FriendsService {
       },
       data: { status: FriendRequestStatus.CANCELLED },
     });
+    await this.hideDirectRoomsBetween(userId, friendId);
     await this.pushSummary(userId);
     await this.pushSummary(friendId);
     return { removed: true };
@@ -385,9 +345,41 @@ export class FriendsService {
         data: { status: FriendRequestStatus.CANCELLED },
       }),
     ]);
+    await this.hideDirectRoomsBetween(initiatorId, targetId, /* bothSides */ true);
     await this.pushSummary(initiatorId);
     await this.pushSummary(targetId);
     return { blocked: true };
+  }
+
+  /** Oculta salas 1:1 entre dos usuarios para quien elimina (o ambos si bloquea). */
+  private async hideDirectRoomsBetween(
+    userId: string,
+    peerId: string,
+    bothSides = false,
+  ) {
+    const rooms = await this.prisma.chatRoom.findMany({
+      where: {
+        AND: [
+          { participants: { some: { userId } } },
+          { participants: { some: { userId: peerId } } },
+        ],
+      },
+      include: { participants: { select: { userId: true } } },
+    });
+    const directRoomIds = rooms
+      .filter((r) => r.participants.length === 2)
+      .map((r) => r.id);
+    if (directRoomIds.length === 0) return;
+
+    const now = new Date();
+    const userIds = bothSides ? [userId, peerId] : [userId];
+    await this.prisma.chatParticipant.updateMany({
+      where: {
+        roomId: { in: directRoomIds },
+        userId: { in: userIds },
+      },
+      data: { hiddenAt: now },
+    });
   }
 
   async areFriends(userA: string, userB: string): Promise<boolean> {

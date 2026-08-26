@@ -1080,6 +1080,8 @@ model ChatParticipant {
   userId     String    @map("user_id") @db.Uuid
   joinedAt   DateTime  @default(now()) @map("joined_at")
   lastReadAt DateTime? @map("last_read_at")
+  /** Si está set, la conversación no aparece en la lista del usuario. */
+  hiddenAt   DateTime? @map("hidden_at")
   createdAt  DateTime  @default(now()) @map("created_at")
 
   room ChatRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)

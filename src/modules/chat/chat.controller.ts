@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -61,6 +61,11 @@ export class ChatController {
   @Post('rooms/:roomId/read')
   readRoom(@CurrentUser() user: JwtPayload, @Param('roomId') roomId: string) {
     return this.chat.markRoomRead(roomId, user.sub);
+  }
+
+  @Delete('rooms/:roomId')
+  hideRoom(@CurrentUser() user: JwtPayload, @Param('roomId') roomId: string) {
+    return this.chat.hideRoom(roomId, user.sub);
   }
 
   @Post('messages/:messageId/read')

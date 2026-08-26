@@ -47,7 +47,14 @@ export class ChatService {
       include: { participants: true },
     });
     const existing = rooms.find((r) => r.participants.length === 2);
-    if (existing) return existing;
+    if (existing) {
+      // Reabrir conversación ocultada por el usuario.
+      await this.prisma.chatParticipant.updateMany({
+        where: { roomId: existing.id, userId, hiddenAt: { not: null } },
+        data: { hiddenAt: null },
+      });
+      return existing;
+    }
 
     return this.prisma.chatRoom.create({
       data: {
@@ -68,6 +75,13 @@ export class ChatService {
     audioDurationMs?: number,
   ) {
     await this.assertParticipant(roomId, senderId);
+    const peer = await this.prisma.chatParticipant.findFirst({
+      where: { roomId, userId: { not: senderId } },
+      select: { userId: true },
+    });
+    if (!peer || !(await this.friends.areFriends(senderId, peer.userId))) {
+      throw new ForbiddenException('Solo puedes chatear con amigos');
+    }
     const trimmedBody = body?.trim() || null;
     const trimmedImage = imageUrl?.trim() || null;
     const trimmedAudio = audioUrl?.trim() || null;
@@ -95,6 +109,11 @@ export class ChatService {
         sender: { select: { id: true, displayName: true, avatarUrl: true } },
         reads: true,
       },
+    });
+    // Si el peer había ocultado el chat, vuelve a mostrárselo al recibir mensaje.
+    await this.prisma.chatParticipant.updateMany({
+      where: { roomId, userId: { not: senderId }, hiddenAt: { not: null } },
+      data: { hiddenAt: null },
     });
     await this.broadcastMessage(roomId, senderId, message);
     return message;
@@ -248,7 +267,7 @@ export class ChatService {
 
   async myRooms(userId: string) {
     const participations = await this.prisma.chatParticipant.findMany({
-      where: { userId },
+      where: { userId, hiddenAt: null },
       include: {
         room: {
           include: {
@@ -310,6 +329,18 @@ export class ChatService {
       }),
     );
     return enriched;
+  }
+
+  /** Oculta la conversación solo para este usuario (no borra mensajes). */
+  async hideRoom(roomId: string, userId: string) {
+    await this.assertParticipant(roomId, userId);
+    await this.prisma.chatParticipant.update({
+      where: { roomId_userId: { roomId, userId } },
+      data: { hiddenAt: new Date() },
+    });
+    const summary = await this.getSummary(userId);
+    this.realtime.emitToUser(userId, 'messenger_summary', summary);
+    return { hidden: true };
   }
 
   async getSummary(userId: string) {
