@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
 import { BarAccessService } from './bar-access.service';
+import { BarSubscriptionService } from './bar-subscription.service';
 import { BarAccessStateResponseDto } from './dto/bar-access-state-response.dto';
 import { toIso } from './mappers/bar-subscription-response.mapper';
 
@@ -9,6 +10,7 @@ export class BarAccessStateService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly barAccess: BarAccessService,
+    private readonly subscriptions: BarSubscriptionService,
   ) {}
 
   async getStateForOwner(ownerUserId: string): Promise<BarAccessStateResponseDto> {
@@ -26,9 +28,19 @@ export class BarAccessStateService {
       throw new NotFoundException('Local no encontrado.');
     }
 
-    const subscription = await this.prisma.barSubscription.findUnique({
+    let subscription = await this.prisma.barSubscription.findUnique({
       where: { barId: bar.id },
     });
+    // Bares antiguos / migraciones incompletas: crea trial en lugar de romper el panel.
+    if (!subscription) {
+      try {
+        subscription = await this.subscriptions.createTrialSubscription(bar.id);
+      } catch {
+        subscription = await this.prisma.barSubscription.findUnique({
+          where: { barId: bar.id },
+        });
+      }
+    }
     if (!subscription) {
       throw new NotFoundException('No existe suscripción para este local.');
     }

@@ -16,7 +16,7 @@ import { BarsService } from './bars.service';
 @ApiTags('bars')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.BAR)
+@Roles(Role.BAR, Role.ADMIN, Role.SUPER_ADMIN)
 @Controller('bars')
 export class BarsController {
   constructor(
