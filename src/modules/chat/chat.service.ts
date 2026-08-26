@@ -155,7 +155,7 @@ export class ChatService {
       message.body?.trim() ||
       (message.audioUrl ? '🎤 Nota de voz' : null) ||
       (message.imageUrl ? '📷 Foto' : 'Nuevo mensaje');
-    const senderName = message.sender?.displayName ?? 'Alguien';
+    const senderName = message.sender?.displayName?.trim() || 'Alguien';
 
     for (const p of participants) {
       // Entrega por usuario: llega aunque el cliente no haya hecho join_room en esa sala.
@@ -164,9 +164,14 @@ export class ChatService {
       await this.notifications.pushOnly(
         p.userId,
         NotificationType.CHAT_MESSAGE,
-        `Mensaje de ${senderName}`,
+        senderName,
         preview,
-        { roomId, messageId: message.id, senderId },
+        {
+          roomId,
+          messageId: message.id,
+          senderId,
+          senderName,
+        },
       );
       const summary = await this.getSummary(p.userId);
       this.realtime.emitToUser(p.userId, 'messenger_summary', summary);

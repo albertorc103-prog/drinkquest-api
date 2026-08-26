@@ -16,6 +16,11 @@ const NEWS_ROOFTOP_TYPES: NotificationType[] = [
   NotificationType.ROOFTOP_PACKAGE_PUBLISHED,
 ];
 
+/** Inbox de la app (campana): solo etiquetas en publicaciones. */
+const INBOX_NOTIFICATION_TYPES: NotificationType[] = [
+  NotificationType.FEED_MENTION,
+];
+
 export type NewsNotificationCategory = 'cocktails' | 'promotions' | 'rooftop';
 
 function typesForNewsCategory(category: NewsNotificationCategory): NotificationType[] {
@@ -158,14 +163,15 @@ export class NotificationsService {
 
   async list(userId: string, page = 1, limit = 30) {
     const skip = (page - 1) * limit;
+    const where = { userId, type: { in: INBOX_NOTIFICATION_TYPES } };
     const [items, total, unreadCount] = await Promise.all([
       this.prisma.notification.findMany({
-        where: { userId },
+        where,
         orderBy: { createdAt: 'desc' },
         skip,
         take: limit,
       }),
-      this.prisma.notification.count({ where: { userId } }),
+      this.prisma.notification.count({ where }),
       this.unreadCount(userId),
     ]);
     return { items, total, page, limit, unreadCount };
@@ -173,7 +179,11 @@ export class NotificationsService {
 
   async unreadCount(userId: string) {
     return this.prisma.notification.count({
-      where: { userId, readAt: null },
+      where: {
+        userId,
+        readAt: null,
+        type: { in: INBOX_NOTIFICATION_TYPES },
+      },
     });
   }
 
@@ -207,7 +217,11 @@ export class NotificationsService {
 
   async markAllRead(userId: string) {
     await this.prisma.notification.updateMany({
-      where: { userId, readAt: null },
+      where: {
+        userId,
+        readAt: null,
+        type: { in: INBOX_NOTIFICATION_TYPES },
+      },
       data: { readAt: new Date() },
     });
     const summary = await this.messengerSummary(userId);
@@ -236,7 +250,15 @@ export class NotificationsService {
     payload?: Prisma.InputJsonValue,
   ) {
     try {
-      await this.fcm.sendToUser(userId, title, body, this.fcmData(type, payload));
+      const data = this.fcmData(type, payload);
+      const roomId = data.roomId?.trim();
+      const isChat = type === NotificationType.CHAT_MESSAGE && !!roomId;
+      await this.fcm.sendToUser(userId, title, body, data, {
+        // Data-only: la app pinta el texto completo y agrupa por sala.
+        dataOnly: isChat,
+        collapseKey: isChat ? `chat_${roomId}` : undefined,
+        androidTag: isChat ? `chat_${roomId}` : undefined,
+      });
     } catch (err) {
       this.logger.warn(
         `Push FCM omitido: ${err instanceof Error ? err.message : String(err)}`,
