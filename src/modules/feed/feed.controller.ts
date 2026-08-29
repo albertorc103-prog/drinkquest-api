@@ -107,8 +107,11 @@ export class FeedController {
   @Get('posts/:id/comments')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  listComments(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
-    return this.feed.listComments(id);
+  listComments(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+  ) {
+    return this.feed.listComments(id, user.sub);
   }
 
   @Post('posts/:id/comments')
@@ -117,9 +120,21 @@ export class FeedController {
   comment(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
-    @Body() body: { body: string },
+    @Body() body: { body: string; parentId?: string },
   ) {
-    return this.feed.comment(id, user.sub, body.body);
+    return this.feed.comment(id, user.sub, body.body, body.parentId);
+  }
+
+  @Post('posts/:postId/comments/:commentId/like')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Me gusta en un comentario (toggle)' })
+  likeComment(
+    @CurrentUser() user: JwtPayload,
+    @Param('postId', new ParseUUIDPipe({ version: '4' })) postId: string,
+    @Param('commentId', new ParseUUIDPipe({ version: '4' })) commentId: string,
+  ) {
+    return this.feed.likeComment(postId, commentId, user.sub);
   }
 
   @Post('posts/:id/share')

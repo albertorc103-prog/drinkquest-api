@@ -396,38 +396,105 @@ export class FeedService {
     }));
   }
 
-  async listComments(postId: string, limit = 50) {
+  async listComments(postId: string, viewerId: string, limit = 50) {
     const post = await this.prisma.feedPost.findUnique({ where: { id: postId } });
     if (!post || post.deletedAt) throw new NotFoundException();
-    return this.prisma.postComment.findMany({
+    const comments = await this.prisma.postComment.findMany({
       where: { postId, deletedAt: null },
       include: {
         author: { select: { id: true, displayName: true, avatarUrl: true } },
+        _count: { select: { likes: true } },
+        likes: {
+          where: { userId: viewerId },
+          select: { id: true },
+          take: 1,
+        },
       },
       orderBy: { createdAt: 'asc' },
       take: limit,
     });
+    return comments.map((comment) => ({
+      id: comment.id,
+      body: comment.body,
+      createdAt: comment.createdAt,
+      parentId: comment.parentId,
+      author: comment.author,
+      likeCount: comment._count.likes,
+      likedByMe: comment.likes.length > 0,
+    }));
   }
 
-  async comment(postId: string, authorId: string, body: string) {
+  async comment(postId: string, authorId: string, body: string, parentId?: string) {
     const post = await this.prisma.feedPost.findUnique({ where: { id: postId } });
     if (!post || post.deletedAt) throw new NotFoundException();
     const text = body?.trim();
     if (!text) throw new BadRequestException('Comentario vacío');
+
+    let parentComment: { authorId: string } | null = null;
+    if (parentId) {
+      parentComment = await this.prisma.postComment.findFirst({
+        where: { id: parentId, postId, deletedAt: null },
+        select: { authorId: true },
+      });
+      if (!parentComment) throw new BadRequestException('Comentario padre no encontrado');
+    }
+
     const comment = await this.prisma.postComment.create({
-      data: { postId, authorId, body: text },
+      data: { postId, authorId, body: text, parentId: parentId ?? null },
       include: {
         author: { select: { id: true, displayName: true, avatarUrl: true } },
+        _count: { select: { likes: true } },
       },
     });
-    if (post.authorId !== authorId) {
+
+    if (parentComment) {
+      if (parentComment.authorId !== authorId) {
+        await this.notifications.create(
+          parentComment.authorId,
+          NotificationType.FEED_COMMENT,
+          'Respondieron a tu comentario',
+        );
+      }
+    } else if (post.authorId !== authorId) {
       await this.notifications.create(
         post.authorId,
         NotificationType.FEED_COMMENT,
         'Nuevo comentario',
       );
     }
-    return comment;
+
+    return {
+      id: comment.id,
+      body: comment.body,
+      createdAt: comment.createdAt,
+      parentId: comment.parentId,
+      author: comment.author,
+      likeCount: comment._count.likes,
+      likedByMe: false,
+    };
+  }
+
+  async likeComment(postId: string, commentId: string, userId: string) {
+    const comment = await this.prisma.postComment.findFirst({
+      where: { id: commentId, postId, deletedAt: null },
+    });
+    if (!comment) throw new NotFoundException();
+    const existing = await this.prisma.postCommentLike.findUnique({
+      where: { commentId_userId: { commentId, userId } },
+    });
+    if (existing) {
+      await this.prisma.postCommentLike.delete({ where: { id: existing.id } });
+      return { liked: false };
+    }
+    await this.prisma.postCommentLike.create({ data: { commentId, userId } });
+    if (comment.authorId !== userId) {
+      await this.notifications.create(
+        comment.authorId,
+        NotificationType.FEED_LIKE,
+        'Les gustó tu comentario',
+      );
+    }
+    return { liked: true };
   }
 
   async share(postId: string) {

@@ -105,7 +105,7 @@ enum SubscriptionStatus {
   CANCELED
 }
 
-/// Plan comercial del local (Explorer $499, Intermedio $1000, Legend $1500).
+/// Plan comercial del local (Explorer $499, Mixologist $1000, Legend $1500).
 enum SubscriptionPlan {
   EXPLORER
   INTERMEDIATE
@@ -319,6 +319,7 @@ model User {
   posts               FeedPost[]
   postLikes           PostLike[]
   postComments        PostComment[]
+  postCommentLikes    PostCommentLike[]
   notifications       Notification[]
   deviceTokens        DeviceToken[]
   reportsFiled        Report[]              @relation("ReportReporter")
@@ -549,7 +550,7 @@ model UserGlobalEventMedal {
   @@map("user_global_event_medals")
 }
 
-/// Bebida especializada del local (Intermedio: 3 COMMON; Legend: 5C/3R/2E/1L). Revisión admin.
+/// Bebida especializada del local (Mixologist: 3 COMMON; Legend: 5C/3R/2E/1L). Revisión admin.
 model BarSpecialDrink {
   id                 String                     @id @default(uuid()) @db.Uuid
   barId              String                     @map("bar_id") @db.Uuid
@@ -1192,16 +1193,34 @@ model PostComment {
   id        String   @id @default(uuid()) @db.Uuid
   postId    String   @map("post_id") @db.Uuid
   authorId  String   @map("author_id") @db.Uuid
+  parentId  String?  @map("parent_id") @db.Uuid
   body      String
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
 
-  post   FeedPost @relation(fields: [postId], references: [id], onDelete: Cascade)
-  author User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  post    FeedPost          @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author  User              @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  parent  PostComment?      @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies PostComment[]     @relation("CommentReplies")
+  likes   PostCommentLike[]
 
   @@index([postId])
+  @@index([parentId])
   @@map("post_comments")
+}
+
+model PostCommentLike {
+  id        String   @id @default(uuid()) @db.Uuid
+  commentId String   @map("comment_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  comment PostComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([commentId, userId])
+  @@map("post_comment_likes")
 }
 
 model Report {
