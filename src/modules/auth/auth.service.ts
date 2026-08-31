@@ -67,8 +67,18 @@ export class AuthService {
             deletedAt: null,
             emailVerified: false,
             emailVerifiedAt: null,
+            totalXp: 0,
+            level: 1,
+            coins: 0,
+            loginStreakDays: 0,
+            lastLoginEpochDay: 0,
+            streakBonusTierClaimed: 0,
+            dailyChestClaimedDay: 0,
+            questProgress: Prisma.DbNull,
+            achievementProgress: Prisma.DbNull,
           },
         });
+        await this.users.wipeUserProgressData(tx, exists.id);
         if (role === Role.BAR) {
           const existingBar = await tx.bar.findFirst({
             where: { ownerUserId: user.id },
@@ -274,20 +284,33 @@ export class AuthService {
     }
 
     const token = await this.createVerificationToken(userId);
-    this.mail.dispatchEmailVerification(user.email, token);
+    try {
+      // Await para devolver error real si Brevo rechaza el remitente (p. ej. Gmail no verificado).
+      await this.mail.sendEmailVerification(user.email, token);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Resend verification failed for ${user.email}: ${message}`);
+      throw new BadRequestException(
+        message.includes('Brevo')
+          ? message
+          : 'No se pudo enviar el correo. En Brevo, el SMTP_FROM debe estar Verified en Senders.',
+      );
+    }
     return {
       message: 'Email de verificación en cola. Puede tardar 1–2 minutos; revisa spam si no llega.',
     };
   }
 
-  /** Crea token y encola envío sin bloquear la respuesta HTTP. */
+  /** Crea token siempre; el envío solo si el correo está configurado. */
   private async queueEmailVerification(userId: string, email: string): Promise<void> {
-    if (!this.mail.isConfigured()) {
-      this.logger.warn('Register OK but MAIL not configured');
-      return;
-    }
     try {
       const token = await this.createVerificationToken(userId);
+      if (!this.mail.isConfigured()) {
+        this.logger.warn(
+          `Verification token created for ${email} but mail is not configured; user can resend later.`,
+        );
+        return;
+      }
       this.mail.dispatchEmailVerification(email, token);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

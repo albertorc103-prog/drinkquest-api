@@ -280,7 +280,7 @@ export class UsersService {
     }
   }
 
-  /** El usuario elimina su propia cuenta: verifica contraseña, soft delete + revocación de sesiones. */
+  /** El usuario elimina su propia cuenta: verifica contraseña, borra progreso, soft delete + revocación de sesiones. */
   async deleteOwnAccount(userId: string, password: string): Promise<{ deleted: true }> {
     const user = await this.prisma.user.findFirst({
       where: { id: userId, deletedAt: null },
@@ -294,18 +294,44 @@ export class UsersService {
     }
 
     const now = new Date();
-    await this.prisma.$transaction([
-      this.prisma.refreshToken.updateMany({
+    await this.prisma.$transaction(async (tx) => {
+      await this.wipeUserProgressData(tx, userId);
+      await tx.refreshToken.updateMany({
         where: { userId, revokedAt: null },
         data: { revokedAt: now },
-      }),
-      this.prisma.deviceToken.deleteMany({ where: { userId } }),
-      this.prisma.user.update({
+      });
+      await tx.deviceToken.deleteMany({ where: { userId } });
+      await tx.user.update({
         where: { id: userId },
-        data: { deletedAt: now, isOnline: false },
-      }),
-    ]);
+        data: {
+          deletedAt: now,
+          isOnline: false,
+          totalXp: 0,
+          level: 1,
+          coins: 0,
+          loginStreakDays: 0,
+          lastLoginEpochDay: 0,
+          streakBonusTierClaimed: 0,
+          dailyChestClaimedDay: 0,
+          questProgress: Prisma.DbNull,
+          achievementProgress: Prisma.DbNull,
+        },
+      });
+    });
     return { deleted: true };
+  }
+
+  /** Borra colección, historial y progreso de misiones/medallas del usuario. */
+  async wipeUserProgressData(tx: Prisma.TransactionClient, userId: string): Promise<void> {
+    await tx.userDrinkUnlock.deleteMany({ where: { userId } });
+    await tx.drinkHistoryEntry.deleteMany({ where: { userId } });
+    await tx.userFavoriteDrink.deleteMany({ where: { userId } });
+    await tx.userMission.deleteMany({ where: { userId } });
+    await tx.userAchievement.deleteMany({ where: { userId } });
+    await tx.userBarMissionProgress.deleteMany({ where: { userId } });
+    await tx.userBarMedal.deleteMany({ where: { userId } });
+    await tx.userGlobalEventProgress.deleteMany({ where: { userId } });
+    await tx.userGlobalEventMedal.deleteMany({ where: { userId } });
   }
 
   async updateProfile(
