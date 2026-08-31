@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { ApiOperation } from '@nestjs/swagger';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -24,6 +25,14 @@ export class UsersController {
   @ApiBearerAuth()
   update(@CurrentUser() user: JwtPayload, @Body() body: UpdateProfileDto) {
     return this.users.updateProfile(user.sub, body);
+  }
+
+  @Delete('me')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Eliminar la cuenta propia (soft delete, irreversible para el usuario)' })
+  deleteAccount(@CurrentUser() user: JwtPayload) {
+    return this.users.deleteOwnAccount(user.sub);
   }
 
   @Post('me/daily-login')

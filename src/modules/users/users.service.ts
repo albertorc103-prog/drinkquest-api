@@ -279,6 +279,29 @@ export class UsersService {
     }
   }
 
+  /** El usuario elimina su propia cuenta: soft delete + revocación de sesiones. */
+  async deleteOwnAccount(userId: string): Promise<{ deleted: true }> {
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+
+    const now = new Date();
+    await this.prisma.$transaction([
+      this.prisma.refreshToken.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: now },
+      }),
+      this.prisma.deviceToken.deleteMany({ where: { userId } }),
+      this.prisma.user.update({
+        where: { id: userId },
+        data: { deletedAt: now, isOnline: false },
+      }),
+    ]);
+    return { deleted: true };
+  }
+
   async updateProfile(
     userId: string,
     data: {
