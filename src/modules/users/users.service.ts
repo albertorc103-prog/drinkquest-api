@@ -1,6 +1,7 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { ProfileVisibility, Prisma, User } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
+import { verifyPassword } from '../../common/utils/crypto.util';
 import {
   AchievementProgressEntryDto,
   QuestProgressEntryDto,
@@ -279,13 +280,18 @@ export class UsersService {
     }
   }
 
-  /** El usuario elimina su propia cuenta: soft delete + revocación de sesiones. */
-  async deleteOwnAccount(userId: string): Promise<{ deleted: true }> {
+  /** El usuario elimina su propia cuenta: verifica contraseña, soft delete + revocación de sesiones. */
+  async deleteOwnAccount(userId: string, password: string): Promise<{ deleted: true }> {
     const user = await this.prisma.user.findFirst({
       where: { id: userId, deletedAt: null },
-      select: { id: true },
+      select: { id: true, passwordHash: true },
     });
     if (!user) throw new NotFoundException('Usuario no encontrado');
+
+    const plain = password?.trim() ?? '';
+    if (!plain || !(await verifyPassword(plain, user.passwordHash))) {
+      throw new UnauthorizedException('Contraseña incorrecta');
+    }
 
     const now = new Date();
     await this.prisma.$transaction([
