@@ -321,8 +321,12 @@ export class UsersService {
     return { deleted: true };
   }
 
-  /** Borra colección, historial y progreso de misiones/medallas del usuario. */
+  /** Borra colección, historial, misiones/medallas y publicaciones del usuario. */
   async wipeUserProgressData(tx: Prisma.TransactionClient, userId: string): Promise<void> {
+    await tx.postLike.deleteMany({ where: { userId } });
+    await tx.postCommentLike.deleteMany({ where: { userId } });
+    await tx.feedPost.deleteMany({ where: { authorId: userId } });
+    await tx.postComment.deleteMany({ where: { authorId: userId } });
     await tx.userDrinkUnlock.deleteMany({ where: { userId } });
     await tx.drinkHistoryEntry.deleteMany({ where: { userId } });
     await tx.userFavoriteDrink.deleteMany({ where: { userId } });
@@ -332,6 +336,7 @@ export class UsersService {
     await tx.userBarMedal.deleteMany({ where: { userId } });
     await tx.userGlobalEventProgress.deleteMany({ where: { userId } });
     await tx.userGlobalEventMedal.deleteMany({ where: { userId } });
+    await tx.notification.deleteMany({ where: { userId } });
   }
 
   async updateProfile(
