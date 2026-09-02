@@ -9,7 +9,15 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Prisma, Role } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
-import { hashPassword, randomToken, sha256, slugify, verifyPassword } from '../../common/utils/crypto.util';
+import {
+  hashPassword,
+  normalizeVerificationCode,
+  randomVerificationCode,
+  randomToken,
+  sha256,
+  slugify,
+  verifyPassword,
+} from '../../common/utils/crypto.util';
 import { MailService } from '../notifications/mail.service';
 import { BarSubscriptionService } from '../subscriptions/bar-subscription.service';
 import { JwtBarClaimsService } from '../subscriptions/jwt-bar-claims.service';
@@ -247,10 +255,12 @@ export class AuthService {
   }
 
   async verifyEmail(token: string): Promise<{ message: string }> {
+    const code = normalizeVerificationCode(token);
+    if (!code) throw new BadRequestException('El código debe tener 6 dígitos');
     const row = await this.prisma.emailVerification.findFirst({
-      where: { tokenHash: sha256(token), usedAt: null, expiresAt: { gt: new Date() } },
+      where: { tokenHash: sha256(code), usedAt: null, expiresAt: { gt: new Date() } },
     });
-    if (!row) throw new BadRequestException('Token inválido o expirado');
+    if (!row) throw new BadRequestException('Código inválido o expirado');
     await this.prisma.$transaction([
       this.prisma.user.update({
         where: { id: row.userId },
@@ -291,13 +301,11 @@ export class AuthService {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.warn(`Resend verification failed for ${user.email}: ${message}`);
       throw new BadRequestException(
-        message.includes('Brevo')
-          ? message
-          : 'No se pudo enviar el correo. En Brevo, el SMTP_FROM debe estar Verified en Senders.',
+        message || 'No se pudo enviar el correo. Intenta de nuevo en unos minutos.',
       );
     }
     return {
-      message: 'Email de verificación en cola. Puede tardar 1–2 minutos; revisa spam si no llega.',
+      message: 'Código de verificación en cola. Puede tardar 1–2 minutos; revisa spam si no llega.',
     };
   }
 
@@ -318,16 +326,24 @@ export class AuthService {
     }
   }
 
+  private static readonly VERIFICATION_CODE_TTL_MS = 15 * 60_000;
+
   private async createVerificationToken(userId: string): Promise<string> {
-    const token = randomToken();
-    await this.prisma.emailVerification.create({
-      data: {
-        userId,
-        tokenHash: sha256(token),
-        expiresAt: new Date(Date.now() + 86400_000),
-      },
-    });
-    return token;
+    const code = randomVerificationCode();
+    await this.prisma.$transaction([
+      this.prisma.emailVerification.updateMany({
+        where: { userId, usedAt: null },
+        data: { usedAt: new Date() },
+      }),
+      this.prisma.emailVerification.create({
+        data: {
+          userId,
+          tokenHash: sha256(code),
+          expiresAt: new Date(Date.now() + AuthService.VERIFICATION_CODE_TTL_MS),
+        },
+      }),
+    ]);
+    return code;
   }
 
   async getMe(jwtUser: JwtPayload): Promise<AuthMeResponseDto> {

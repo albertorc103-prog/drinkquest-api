@@ -224,6 +224,7 @@ SMTP_FROM=onboarding@resend.dev
 | Email no llega | `MAIL_ENABLED=false` o SMTP timeout en Render | Usa `BREVO_API_KEY` (HTTPS). Revisa logs: `Connection timeout` = SMTP bloqueado |
 | `mail: degraded` en health | API key inválida o SMTP caído | Brevo → API keys; `SMTP_FROM` verificado |
 | Brevo rechaza envío | `SMTP_FROM` no está en Senders verificados | Usar exactamente el email verificado en Brevo |
+| HTTP 401 + IP desconocida | Brevo bloquea la IP del servidor (p. ej. Render) | Brevo → **Security** → **Authorized IPs**: añade la IP de Render o desactiva la restricción. IP típica en logs: `74.220.50.223` |
 | Registro sin correo | Falló SMTP al registrarse (error silencioso) | Pulsa **Reenviar** en perfil tras configurar SMTP |
 | Enlace email no abre app | URL web en vez de deep link | Usar `EMAIL_VERIFY_URL` de arriba |
 

@@ -188,13 +188,13 @@ export class MailService implements OnModuleInit {
     const url = this.authLink(
       this.config.get<string>('smtp.verifyEmailUrlTemplate') ||
         process.env.EMAIL_VERIFY_URL ||
-        'drinkquest://auth/verify?token={token}',
+        'drinkquest://auth/verify?code={token}',
       token,
     );
     await this.send(
       to,
-      'Verifica tu email — DrinkQuest',
-      `Hola,\n\nToca este enlace en tu teléfono (con DrinkQuest instalada):\n\n${url}\n\nEl enlace caduca en 24 horas. Si no abre la app, copia la URL completa en el navegador.\n\n— DrinkQuest`,
+      'Tu código DrinkQuest — verificación',
+      `Hola,\n\nTu código de verificación es:\n\n${token}\n\nIntroduce estos 6 dígitos en la app. El código caduca en 15 minutos.\n\nTambién puedes abrir este enlace en tu teléfono:\n${url}\n\nSi no creaste esta cuenta, ignora este correo.\n\n— DrinkQuest`,
     );
   }
 
@@ -281,14 +281,35 @@ export class MailService implements OnModuleInit {
       const body = await res.text().catch(() => '');
       this.logger.warn(
         `Brevo API send failed (${to}, ${subject}): HTTP ${res.status} ${body}. ` +
-          `Revisa BREVO_API_KEY y que SMTP_FROM=${senderEmail} esté verificado en Brevo → Remitentes.`,
+          `Revisa BREVO_API_KEY, IP autorizada en Brevo y que SMTP_FROM=${senderEmail} esté verificado en Remitentes.`,
       );
-      const hint = body.slice(0, 180).replace(/\s+/g, ' ');
-      throw new Error(
-        `Brevo rechazó el envío (HTTP ${res.status}) con From=${senderEmail}. ${hint}`,
-      );
+      throw new Error(this.formatBrevoErrorForUser(res.status, body, senderEmail));
     }
     const data = (await res.json().catch(() => ({}))) as { messageId?: string };
     this.logger.log(`Brevo API sent to ${to} (${subject}) id=${data.messageId ?? 'n/a'}`);
+  }
+
+  /** Mensaje seguro para mostrar en la app (sin JSON ni detalles de Brevo). */
+  private formatBrevoErrorForUser(status: number, body: string, senderEmail: string): string {
+    const lower = body.toLowerCase();
+    if (lower.includes('unrecognized ip') || lower.includes('ip address')) {
+      return (
+        'No pudimos enviar el correo en este momento. Intenta de nuevo en unos minutos ' +
+        'o revisa spam por si ya recibiste un código.'
+      );
+    }
+    if (status === 401 || status === 403) {
+      return 'No pudimos enviar el correo ahora. Intenta más tarde o revisa la carpeta de spam.';
+    }
+    if (
+      lower.includes('sender') ||
+      lower.includes('not verified') ||
+      lower.includes('invalid from')
+    ) {
+      return (
+        `No se pudo enviar desde ${senderEmail}. Si el problema continúa, contacta soporte.`
+      );
+    }
+    return 'No se pudo enviar el correo. Intenta de nuevo en unos minutos o revisa spam.';
   }
 }
