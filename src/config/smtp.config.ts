@@ -23,7 +23,7 @@ export default registerAs('smtp', () => ({
   /** Deep link Android; sustituir {token} al enviar. */
   verifyEmailUrlTemplate: authLinkTemplate(
     'EMAIL_VERIFY_URL',
-    'drinkquest://auth/verify?token={token}',
+    'drinkquest://auth/verify?code={token}',
   ),
   resetPasswordUrlTemplate: authLinkTemplate(
     'EMAIL_RESET_URL',
