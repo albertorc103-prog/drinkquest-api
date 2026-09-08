@@ -17,6 +17,8 @@ export interface PromotionAnalyticsSummaryDto {
   impressions: number;
   opens: number;
   qrScans: number;
+  /** Usuarios únicos que activaron la promo escaneando el QR. */
+  uniqueActivations: number;
 }
 
 export interface PromotionResponseDto {

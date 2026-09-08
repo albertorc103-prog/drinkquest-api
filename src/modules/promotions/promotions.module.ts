@@ -3,6 +3,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { AdminPromotionModerationService } from './admin-promotion-moderation.service';
 import { BarPromotionsController } from './bar-promotions.controller';
+import { PromotionActivationService } from './promotion-activation.service';
 import { PromotionAnalyticsController } from './promotion-analytics.controller';
 import { PromotionAnalyticsService } from './promotion-analytics.service';
 import { PromotionFeedController } from './promotion-feed.controller';
@@ -16,12 +17,14 @@ import { PromotionService } from './promotion.service';
     PromotionService,
     PromotionFeedService,
     PromotionAnalyticsService,
+    PromotionActivationService,
     AdminPromotionModerationService,
   ],
   exports: [
     PromotionService,
     PromotionFeedService,
     PromotionAnalyticsService,
+    PromotionActivationService,
     AdminPromotionModerationService,
   ],
 })

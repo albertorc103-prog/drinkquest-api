@@ -7,12 +7,16 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { PromotionAnalyticsSummaryDto } from './dto/promotion-response.dto';
+import { PromotionActivationService } from './promotion-activation.service';
 
 @Injectable()
 export class PromotionAnalyticsService {
   private readonly logger = new Logger(PromotionAnalyticsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly activations: PromotionActivationService,
+  ) {}
 
   async trackEvent(
     promotionId: string,
@@ -45,18 +49,31 @@ export class PromotionAnalyticsService {
     promotionIds: string[],
   ): Promise<Record<string, PromotionAnalyticsSummaryDto>> {
     if (promotionIds.length === 0) return {};
-    const grouped = await this.prisma.promotionAnalyticsEvent.groupBy({
-      by: ['promotionId', 'eventType'],
-      _count: { _all: true },
-      where: { promotionId: { in: promotionIds } },
-    });
+    const [grouped, uniqueActivations] = await Promise.all([
+      this.prisma.promotionAnalyticsEvent.groupBy({
+        by: ['promotionId', 'eventType'],
+        _count: { _all: true },
+        where: { promotionId: { in: promotionIds } },
+      }),
+      this.activations.countActivationsForPromotionIds(promotionIds),
+    ]);
 
     const result: Record<string, PromotionAnalyticsSummaryDto> = {};
     for (const id of promotionIds) {
-      result[id] = { impressions: 0, opens: 0, qrScans: 0 };
+      result[id] = {
+        impressions: 0,
+        opens: 0,
+        qrScans: 0,
+        uniqueActivations: uniqueActivations[id] ?? 0,
+      };
     }
     for (const row of grouped) {
-      const target = result[row.promotionId] ?? { impressions: 0, opens: 0, qrScans: 0 };
+      const target = result[row.promotionId] ?? {
+        impressions: 0,
+        opens: 0,
+        qrScans: 0,
+        uniqueActivations: uniqueActivations[row.promotionId] ?? 0,
+      };
       if (row.eventType === PromotionAnalyticsEventType.IMPRESSION) target.impressions = row._count._all;
       if (row.eventType === PromotionAnalyticsEventType.OPEN) target.opens = row._count._all;
       if (row.eventType === PromotionAnalyticsEventType.QR_SCAN) target.qrScans = row._count._all;
@@ -86,4 +103,3 @@ export class PromotionAnalyticsService {
     }
   }
 }
-

@@ -1,5 +1,5 @@
-import { Body, Controller, Param, Post, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PromotionAnalyticsEventType, Role } from '@prisma/client';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -7,6 +7,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { TrackPromotionEventDto } from './dto/track-promotion-event.dto';
+import { PromotionActivationService } from './promotion-activation.service';
 import { PromotionAnalyticsService } from './promotion-analytics.service';
 
 @ApiTags('promotions-analytics')
@@ -15,7 +16,22 @@ import { PromotionAnalyticsService } from './promotion-analytics.service';
 @Roles(Role.USER)
 @Controller('promotions')
 export class PromotionAnalyticsController {
-  constructor(private readonly analytics: PromotionAnalyticsService) {}
+  constructor(
+    private readonly analytics: PromotionAnalyticsService,
+    private readonly activations: PromotionActivationService,
+  ) {}
+
+  @Get('me/active')
+  @ApiOperation({ summary: 'Promociones activas del usuario (escaneadas y vigentes)' })
+  listActive(@CurrentUser() user: JwtPayload) {
+    return this.activations.listActiveForUser(user.sub);
+  }
+
+  @Post(':id/activate')
+  @ApiOperation({ summary: 'Activar promoción escaneando su QR (otorga XP una vez)' })
+  activate(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.activations.activateByQr(user.sub, id);
+  }
 
   @Post(':id/impression')
   impression(
@@ -41,7 +57,7 @@ export class PromotionAnalyticsController {
     @Param('id') id: string,
     @Body() body: TrackPromotionEventDto,
   ) {
-    return this.analytics.trackEvent(id, PromotionAnalyticsEventType.QR_SCAN, user.sub, body.metadata);
+    // Compat: el escaneo de QR ahora activa la promo (XP + contador único).
+    return this.activations.activateByQr(user.sub, id);
   }
 }
-

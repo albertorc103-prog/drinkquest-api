@@ -309,6 +309,7 @@ model User {
   drinkUnlocks        UserDrinkUnlock[]
   drinkHistory        DrinkHistoryEntry[]
   favoriteDrinks      UserFavoriteDrink[]
+  promotionActivations UserPromotionActivation[]
   userMissions        UserMission[]
   userAchievements    UserAchievement[]
   userBarMissionProgress UserBarMissionProgress[]
@@ -713,6 +714,7 @@ model BarPromotion {
   bar Bar @relation(fields: [barId], references: [id], onDelete: Cascade)
   events BarPromotionEvent[]
   analyticsEvents PromotionAnalyticsEvent[]
+  activations UserPromotionActivation[]
 
   @@index([barId])
   @@index([status])
@@ -757,6 +759,26 @@ model PromotionAnalyticsEvent {
   @@index([eventType, createdAt])
   @@index([userId])
   @@map("promotion_analytics_events")
+}
+
+/// Activación de una promoción Happy Hour por un usuario al escanear su QR.
+model UserPromotionActivation {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  promotionId String   @map("promotion_id") @db.Uuid
+  barId       String   @map("bar_id") @db.Uuid
+  xpEarned    Int      @default(0) @map("xp_earned")
+  activatedAt DateTime @default(now()) @map("activated_at")
+  expiresAt   DateTime @map("expires_at")
+
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  promotion BarPromotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, promotionId])
+  @@index([userId, expiresAt])
+  @@index([promotionId])
+  @@index([barId])
+  @@map("user_promotion_activations")
 }
 
 /// Suscripción 1:1 del local — facturación, trial y flags operativos (QR / promos).
