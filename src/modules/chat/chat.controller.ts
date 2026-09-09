@@ -27,6 +27,14 @@ export class ChatController {
     return this.chat.getOrCreateRoom(user.sub, body.friendId);
   }
 
+  @Post('groups')
+  createGroup(
+    @CurrentUser() user: JwtPayload,
+    @Body() body: { name: string; avatarUrl?: string; memberIds: string[] },
+  ) {
+    return this.chat.createGroup(user.sub, body);
+  }
+
   @Get('rooms/:roomId/messages')
   messages(
     @CurrentUser() user: JwtPayload,

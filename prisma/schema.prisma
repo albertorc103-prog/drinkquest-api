@@ -265,6 +265,11 @@ enum MagazineSection {
   PARA_DATE
 }
 
+enum ChatRoomType {
+  DIRECT
+  GROUP
+}
+
 model User {
   id                String            @id @default(uuid()) @db.Uuid
   email             String            @unique
@@ -326,6 +331,7 @@ model User {
   reportsFiled        Report[]              @relation("ReportReporter")
   reportsReceived     Report[]              @relation("ReportTargetUser")
   qrSessionsScanned   QrSession[]           @relation("QrScannedBy")
+  createdChatRooms    ChatRoom[]            @relation("ChatRoomCreator")
 
   @@index([email])
   @@index([role])
@@ -1087,13 +1093,19 @@ model UserBlock {
 }
 
 model ChatRoom {
-  id        String   @id @default(uuid()) @db.Uuid
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id          String       @id @default(uuid()) @db.Uuid
+  type        ChatRoomType @default(DIRECT)
+  name        String?
+  avatarUrl   String?      @map("avatar_url")
+  createdById String?      @map("created_by_id") @db.Uuid
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
 
+  createdBy    User?             @relation("ChatRoomCreator", fields: [createdById], references: [id], onDelete: SetNull)
   participants ChatParticipant[]
   messages     ChatMessage[]
 
+  @@index([type])
   @@map("chat_rooms")
 }
 

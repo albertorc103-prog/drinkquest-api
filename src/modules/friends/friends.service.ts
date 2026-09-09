@@ -359,6 +359,7 @@ export class FriendsService {
   ) {
     const rooms = await this.prisma.chatRoom.findMany({
       where: {
+        type: 'DIRECT',
         AND: [
           { participants: { some: { userId } } },
           { participants: { some: { userId: peerId } } },

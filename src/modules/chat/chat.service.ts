@@ -3,7 +3,7 @@ import {
   ForbiddenException,
   Injectable,
 } from '@nestjs/common';
-import { NotificationType } from '@prisma/client';
+import { ChatRoomType, NotificationType } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { RealtimeHub } from '../../common/realtime/realtime-hub.service';
 import { levelFromTotalXp } from '../../common/utils/level-from-xp.util';
@@ -12,6 +12,7 @@ import { FriendsService } from '../friends/friends.service';
 
 /** Duración máxima de notas de voz (ms). */
 export const CHAT_VOICE_MAX_MS = 30_000;
+const GROUP_MAX_MEMBERS = 40;
 
 @Injectable()
 export class ChatService {
@@ -39,6 +40,7 @@ export class ChatService {
     }
     const rooms = await this.prisma.chatRoom.findMany({
       where: {
+        type: ChatRoomType.DIRECT,
         AND: [
           { participants: { some: { userId } } },
           { participants: { some: { userId: friendId } } },
@@ -58,12 +60,70 @@ export class ChatService {
 
     return this.prisma.chatRoom.create({
       data: {
+        type: ChatRoomType.DIRECT,
         participants: {
           create: [{ userId }, { userId: friendId }],
         },
       },
       include: { participants: true },
     });
+  }
+
+  /** Chat comunitario: creador + amigos seleccionados. */
+  async createGroup(
+    creatorId: string,
+    input: { name: string; avatarUrl?: string; memberIds: string[] },
+  ) {
+    const name = input.name?.trim() ?? '';
+    if (name.length < 2) {
+      throw new BadRequestException('El nombre del grupo debe tener al menos 2 caracteres');
+    }
+    if (name.length > 60) {
+      throw new BadRequestException('El nombre del grupo es demasiado largo');
+    }
+    const uniqueMembers = [...new Set((input.memberIds ?? []).map((id) => id.trim()).filter(Boolean))];
+    const withoutSelf = uniqueMembers.filter((id) => id !== creatorId);
+    if (withoutSelf.length < 1) {
+      throw new BadRequestException('Selecciona al menos un amigo para el grupo');
+    }
+    if (withoutSelf.length + 1 > GROUP_MAX_MEMBERS) {
+      throw new BadRequestException(`Máximo ${GROUP_MAX_MEMBERS} miembros en el grupo`);
+    }
+    for (const memberId of withoutSelf) {
+      if (!(await this.friends.areFriends(creatorId, memberId))) {
+        throw new ForbiddenException('Solo puedes agregar amigos al grupo');
+      }
+    }
+    const avatarUrl = input.avatarUrl?.trim() || null;
+    const room = await this.prisma.chatRoom.create({
+      data: {
+        type: ChatRoomType.GROUP,
+        name,
+        avatarUrl,
+        createdById: creatorId,
+        participants: {
+          create: [{ userId: creatorId }, ...withoutSelf.map((userId) => ({ userId }))],
+        },
+      },
+      include: {
+        participants: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                displayName: true,
+                avatarUrl: true,
+                isOnline: true,
+                lastSeenAt: true,
+                level: true,
+                totalXp: true,
+              },
+            },
+          },
+        },
+      },
+    });
+    return this.mapRoomSummary(room, creatorId, null, 0, false);
   }
 
   async sendMessage(
@@ -75,12 +135,19 @@ export class ChatService {
     audioDurationMs?: number,
   ) {
     await this.assertParticipant(roomId, senderId);
-    const peer = await this.prisma.chatParticipant.findFirst({
-      where: { roomId, userId: { not: senderId } },
-      select: { userId: true },
+    const room = await this.prisma.chatRoom.findUnique({
+      where: { id: roomId },
+      select: { type: true },
     });
-    if (!peer || !(await this.friends.areFriends(senderId, peer.userId))) {
-      throw new ForbiddenException('Solo puedes chatear con amigos');
+    if (!room) throw new ForbiddenException('Sala no encontrada');
+    if (room.type === ChatRoomType.DIRECT) {
+      const peer = await this.prisma.chatParticipant.findFirst({
+        where: { roomId, userId: { not: senderId } },
+        select: { userId: true },
+      });
+      if (!peer || !(await this.friends.areFriends(senderId, peer.userId))) {
+        throw new ForbiddenException('Solo puedes chatear con amigos');
+      }
     }
     const trimmedBody = body?.trim() || null;
     const trimmedImage = imageUrl?.trim() || null;
@@ -114,6 +181,10 @@ export class ChatService {
     await this.prisma.chatParticipant.updateMany({
       where: { roomId, userId: { not: senderId }, hiddenAt: { not: null } },
       data: { hiddenAt: null },
+    });
+    await this.prisma.chatRoom.update({
+      where: { id: roomId },
+      data: { updatedAt: new Date() },
     });
     await this.broadcastMessage(roomId, senderId, message);
     return message;
@@ -166,15 +237,25 @@ export class ChatService {
     },
   ) {
     const payload = this.toRealtimeMessagePayload(message);
-    const participants = await this.prisma.chatParticipant.findMany({
-      where: { roomId },
-      select: { userId: true },
-    });
+    const [participants, room] = await Promise.all([
+      this.prisma.chatParticipant.findMany({
+        where: { roomId },
+        select: { userId: true },
+      }),
+      this.prisma.chatRoom.findUnique({
+        where: { id: roomId },
+        select: { type: true, name: true },
+      }),
+    ]);
     const preview =
       message.body?.trim() ||
       (message.audioUrl ? '🎤 Nota de voz' : null) ||
       (message.imageUrl ? '📷 Foto' : 'Nuevo mensaje');
     const senderName = message.sender?.displayName?.trim() || 'Alguien';
+    const notifTitle =
+      room?.type === ChatRoomType.GROUP && room.name?.trim()
+        ? `${senderName} · ${room.name.trim()}`
+        : senderName;
 
     for (const p of participants) {
       // Entrega por usuario: llega aunque el cliente no haya hecho join_room en esa sala.
@@ -183,13 +264,14 @@ export class ChatService {
       await this.notifications.pushOnly(
         p.userId,
         NotificationType.CHAT_MESSAGE,
-        senderName,
+        notifTitle,
         preview,
         {
           roomId,
           messageId: message.id,
           senderId,
           senderName,
+          groupName: room?.type === ChatRoomType.GROUP ? room.name : null,
         },
       );
       const summary = await this.getSummary(p.userId);
@@ -300,35 +382,76 @@ export class ChatService {
       orderBy: { room: { updatedAt: 'desc' } },
     });
 
-    const enriched = await Promise.all(
+    return Promise.all(
       participations.map(async (p) => {
-        const peer = p.room.participants.find((x) => x.userId !== userId)?.user;
         const last = p.room.messages[0] ?? null;
         const unreadCount = await this.unreadCountForRoom(p.roomId, userId);
         const lastReadByPeer = last
           ? last.reads.some((r) => r.userId !== userId)
           : false;
-        return {
-          roomId: p.roomId,
-          peer: peer
-            ? {
-                id: peer.id,
-                displayName: peer.displayName,
-                avatarUrl: peer.avatarUrl,
-                isOnline: peer.isOnline,
-                lastSeenAt: peer.lastSeenAt?.toISOString() ?? null,
-                level: levelFromTotalXp(peer.totalXp ?? 0),
-                totalXp: peer.totalXp,
-              }
-            : null,
-          lastMessage: last,
-          unreadCount,
-          isOnline: peer?.isOnline ?? false,
-          lastMessageReadByPeer: lastReadByPeer,
-        };
+        return this.mapRoomSummary(p.room, userId, last, unreadCount, lastReadByPeer);
       }),
     );
-    return enriched;
+  }
+
+  private mapRoomSummary(
+    room: {
+      id: string;
+      type: ChatRoomType;
+      name: string | null;
+      avatarUrl: string | null;
+      participants: Array<{
+        userId: string;
+        user: {
+          id: string;
+          displayName: string;
+          avatarUrl: string | null;
+          isOnline: boolean;
+          lastSeenAt: Date | null;
+          level: number;
+          totalXp: number;
+        };
+      }>;
+    },
+    viewerId: string,
+    last: {
+      body: string | null;
+      imageUrl: string | null;
+      audioUrl?: string | null;
+      createdAt: Date;
+      reads: Array<{ userId: string }>;
+      sender?: { id: string; displayName: string; avatarUrl: string | null } | null;
+    } | null,
+    unreadCount: number,
+    lastMessageReadByPeer: boolean,
+  ) {
+    const isGroup = room.type === ChatRoomType.GROUP;
+    const peerUser = isGroup
+      ? null
+      : room.participants.find((x) => x.userId !== viewerId)?.user ?? null;
+    const peer = peerUser
+      ? {
+          id: peerUser.id,
+          displayName: peerUser.displayName,
+          avatarUrl: peerUser.avatarUrl,
+          isOnline: peerUser.isOnline,
+          lastSeenAt: peerUser.lastSeenAt?.toISOString() ?? null,
+          level: levelFromTotalXp(peerUser.totalXp ?? 0),
+          totalXp: peerUser.totalXp,
+        }
+      : null;
+    return {
+      roomId: room.id,
+      type: room.type,
+      name: isGroup ? room.name : null,
+      avatarUrl: isGroup ? room.avatarUrl : null,
+      memberCount: room.participants.length,
+      peer,
+      lastMessage: last,
+      unreadCount,
+      isOnline: peer?.isOnline ?? false,
+      lastMessageReadByPeer,
+    };
   }
 
   /** Oculta la conversación solo para este usuario (no borra mensajes). */
