@@ -27,7 +27,8 @@ type VenueEventRow = {
   };
 };
 
-export function mapVenueEvent(row: VenueEventRow) {
+export function mapVenueEvent(row: VenueEventRow, now: Date = new Date()) {
+  const withinWindow = row.endsAt.getTime() >= now.getTime();
   return {
     id: row.id,
     barId: row.barId,
@@ -45,7 +46,9 @@ export function mapVenueEvent(row: VenueEventRow) {
     updatedAt: row.updatedAt.toISOString(),
     isLive:
       row.status === VenueEventStatus.ACTIVE &&
-      row.moderationStatus === VenueEventModerationStatus.VISIBLE,
+      row.moderationStatus === VenueEventModerationStatus.VISIBLE &&
+      withinWindow,
+    isExpired: !withinWindow,
     bar: row.bar
       ? {
           id: row.bar.id,

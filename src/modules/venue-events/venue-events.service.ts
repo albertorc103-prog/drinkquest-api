@@ -44,6 +44,7 @@ export class VenueEventsService {
   async create(ownerUserId: string, dto: CreateVenueEventDto) {
     const { bar } = await this.assertOwnerCanManage(ownerUserId);
     this.assertDateRange(dto.startsAt, dto.endsAt);
+    this.assertNotAlreadyExpired(dto.endsAt);
 
     const created = await this.prisma.barVenueEvent.create({
       data: {
@@ -70,6 +71,7 @@ export class VenueEventsService {
     const startsAt = dto.startsAt ? new Date(dto.startsAt) : event.startsAt;
     const endsAt = dto.endsAt ? new Date(dto.endsAt) : event.endsAt;
     this.assertDateRange(startsAt.toISOString(), endsAt.toISOString());
+    this.assertNotAlreadyExpired(endsAt.toISOString());
 
     const wasRemoved = event.moderationStatus === VenueEventModerationStatus.REMOVED;
 
@@ -111,6 +113,7 @@ export class VenueEventsService {
       throw new BadRequestException('No se puede activar un evento archivado.');
     }
     this.assertDateRange(event.startsAt.toISOString(), event.endsAt.toISOString());
+    this.assertNotAlreadyExpired(event.endsAt.toISOString());
 
     const updated = await this.prisma.barVenueEvent.update({
       where: { id: event.id },
@@ -160,6 +163,18 @@ export class VenueEventsService {
     }
     if (end <= start) {
       throw new BadRequestException('La fecha de fin debe ser posterior al inicio.');
+    }
+  }
+
+  private assertNotAlreadyExpired(endsAt: string | Date, now: Date = new Date()) {
+    const end = endsAt instanceof Date ? endsAt : new Date(endsAt);
+    if (!Number.isFinite(end.getTime())) {
+      throw new BadRequestException('Fechas inválidas.');
+    }
+    if (end <= now) {
+      throw new BadRequestException(
+        'No se puede publicar un evento ya vencido. Ajusta la fecha de fin a una fecha futura.',
+      );
     }
   }
 
