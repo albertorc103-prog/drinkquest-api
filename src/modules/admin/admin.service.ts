@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { ReportStatus, Role } from '@prisma/client';
+import { Prisma, ReportStatus, Role } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
+import { UsersService } from '../users/users.service';
 import { mapAdminBarRow } from './mappers/admin-bar.mapper';
 
 const barAdminInclude = {
@@ -19,7 +20,10 @@ const barAdminInclude = {
 
 @Injectable()
 export class AdminService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly users: UsersService,
+  ) {}
 
   async analytics() {
     const [users, bars, unlocks, reports] = await Promise.all([
@@ -78,6 +82,26 @@ export class AdminService {
   }
 
   async softDeleteUser(userId: string) {
-    return this.prisma.user.update({ where: { id: userId }, data: { deletedAt: new Date() } });
+    const now = new Date();
+    await this.prisma.$transaction(async (tx) => {
+      await this.users.wipeUserProgressData(tx, userId);
+      await tx.user.update({
+        where: { id: userId },
+        data: {
+          deletedAt: now,
+          isOnline: false,
+          totalXp: 0,
+          level: 1,
+          coins: 0,
+          loginStreakDays: 0,
+          lastLoginEpochDay: 0,
+          streakBonusTierClaimed: 0,
+          dailyChestClaimedDay: 0,
+          questProgress: Prisma.DbNull,
+          achievementProgress: Prisma.DbNull,
+        },
+      });
+    });
+    return { deleted: true as const };
   }
 }

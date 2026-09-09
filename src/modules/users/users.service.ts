@@ -588,12 +588,20 @@ export class UsersService {
       const prev = stored[key] ?? {};
       const wasDone = prev.unlockedAt != null && Number(prev.unlockedAt) > 0;
       const progress = Math.max(Number(prev.progress ?? 0), Number(inc.progress ?? 0));
-      const unlockedAt = this.earliestMillis(prev.unlockedAt, inc.unlockedAt);
       const incomingXp =
         inc.xpReward != null && Number.isFinite(Number(inc.xpReward))
           ? Math.max(0, Number(inc.xpReward))
           : 0;
       const xpReward = Math.max(Number(prev.xpReward ?? 0), incomingXp);
+      // No rehidratar unlocks "fantasma" tras wipe: solo aceptar desbloqueo nuevo si el
+      // cliente manda xpReward (completación real). Push silent (awardXp=false) no revive medallas.
+      const claimedUnlock = inc.unlockedAt != null && Number(inc.unlockedAt) > 0;
+      let unlockedAt: number | null = wasDone
+        ? this.earliestMillis(prev.unlockedAt, inc.unlockedAt)
+        : null;
+      if (!wasDone && claimedUnlock && incomingXp > 0) {
+        unlockedAt = Number(inc.unlockedAt);
+      }
       merged[key] = {
         progress,
         unlockedAt: unlockedAt ?? null,

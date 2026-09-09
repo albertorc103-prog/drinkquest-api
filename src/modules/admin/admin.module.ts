@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { PromotionsModule } from '../promotions/promotions.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
+import { UsersModule } from '../users/users.module';
 import { AdminPromotionsController } from './admin-promotions.controller';
 import { AdminSubscriptionsController } from './admin-subscriptions.controller';
 import { AdminController } from './admin.controller';
@@ -9,7 +10,7 @@ import { AdminBarsMenuService } from './admin-bars-menu.service';
 import { AdminService } from './admin.service';
 
 @Module({
-  imports: [AuthModule, SubscriptionsModule, PromotionsModule],
+  imports: [AuthModule, SubscriptionsModule, PromotionsModule, UsersModule],
   controllers: [AdminController, AdminSubscriptionsController, AdminPromotionsController],
   providers: [AdminService, AdminBarsMenuService],
 })
