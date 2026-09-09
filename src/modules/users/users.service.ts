@@ -321,7 +321,7 @@ export class UsersService {
     return { deleted: true };
   }
 
-  /** Borra colección, historial, misiones/medallas y publicaciones del usuario. */
+  /** Borra colección, historial, misiones/medallas, publicaciones y grafo social del usuario. */
   async wipeUserProgressData(tx: Prisma.TransactionClient, userId: string): Promise<void> {
     await tx.postLike.deleteMany({ where: { userId } });
     await tx.postCommentLike.deleteMany({ where: { userId } });
@@ -337,6 +337,16 @@ export class UsersService {
     await tx.userGlobalEventProgress.deleteMany({ where: { userId } });
     await tx.userGlobalEventMedal.deleteMany({ where: { userId } });
     await tx.notification.deleteMany({ where: { userId } });
+    // Soft-delete no dispara onDelete Cascade: al reactivar el mismo userId no deben volver contactos.
+    await tx.friendship.deleteMany({
+      where: { OR: [{ userAId: userId }, { userBId: userId }] },
+    });
+    await tx.friendRequest.deleteMany({
+      where: { OR: [{ senderId: userId }, { receiverId: userId }] },
+    });
+    await tx.userBlock.deleteMany({
+      where: { OR: [{ initiatorId: userId }, { targetId: userId }] },
+    });
   }
 
   async updateProfile(
