@@ -19,6 +19,8 @@ import { NotificationsService } from '../notifications/notifications.service';
 export const PROMOTION_QR_XP_REWARD = 25;
 /** Ventana en que la promo queda “activa” para el usuario tras escanear el QR. */
 export const PROMOTION_ACTIVATION_TTL_MS = 5 * 60 * 60 * 1000;
+/** Máximo de promociones activas a la vez, cada una de un bar distinto. */
+export const MAX_ACTIVE_PROMOTIONS_FROM_DISTINCT_BARS = 3;
 
 export interface PromotionActivationResultDto {
   promotionId: string;
@@ -102,6 +104,8 @@ export class PromotionActivationService {
     if (activationExpiresAt <= now) {
       throw new BadRequestException('Esta promoción ya no está vigente.');
     }
+
+    await this.assertCanClaimActivationSlot(userId, promo.barId, now);
 
     // Misma promo ya caducada: renovar ventana de 5 h (sin XP extra).
     if (existing) {
@@ -196,6 +200,47 @@ export class PromotionActivationService {
       expiresAt: result.activation.expiresAt.toISOString(),
       alreadyActive: false,
     };
+  }
+
+  /**
+   * Solo 3 activas a la vez y de bares distintos.
+   * Al renovar/crear, el bar de la promo no debe tener ya otra activa, y el cupo total ≤ 3.
+   */
+  private async assertCanClaimActivationSlot(
+    userId: string,
+    barId: string,
+    now: Date,
+  ): Promise<void> {
+    const active = await this.findCurrentlyActiveRows(userId, now);
+    const otherBars = active.filter((row) => row.barId !== barId);
+    const sameBar = active.find((row) => row.barId === barId);
+    if (sameBar) {
+      throw new BadRequestException(
+        'Ya tienes una promoción activa de este local. Espera a que expire (5 h) o elige otro bar.',
+      );
+    }
+    if (otherBars.length >= MAX_ACTIVE_PROMOTIONS_FROM_DISTINCT_BARS) {
+      throw new BadRequestException(
+        `Solo puedes tener ${MAX_ACTIVE_PROMOTIONS_FROM_DISTINCT_BARS} promociones activas de locales distintos. Espera a que expire alguna.`,
+      );
+    }
+  }
+
+  private async findCurrentlyActiveRows(userId: string, now: Date) {
+    const activatedAfter = new Date(now.getTime() - PROMOTION_ACTIVATION_TTL_MS);
+    return this.prisma.userPromotionActivation.findMany({
+      where: {
+        userId,
+        expiresAt: { gt: now },
+        activatedAt: { gt: activatedAfter },
+        promotion: {
+          status: PromotionStatus.ACTIVE,
+          approvalStatus: PromotionApprovalStatus.APPROVED,
+          endsAt: { gt: now },
+        },
+      },
+      select: { id: true, barId: true, promotionId: true },
+    });
   }
 
   async listActiveForUser(userId: string): Promise<ActiveUserPromotionDto[]> {
