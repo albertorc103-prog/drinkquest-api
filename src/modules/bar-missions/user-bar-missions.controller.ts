@@ -24,4 +24,13 @@ export class UserBarMissionsController {
   active(@CurrentUser() user: JwtPayload) {
     return this.barMissions.listActiveForUser(user.sub);
   }
+
+  @Get('me/medals')
+  @ApiOperation({
+    summary:
+      'Medallas de locales desbloqueadas (permanecen tras finalizar la temporada)',
+  })
+  medals(@CurrentUser() user: JwtPayload) {
+    return this.barMissions.listMedalsForUser(user.sub);
+  }
 }

@@ -285,6 +285,53 @@ export class BarMissionsService {
     };
   }
 
+  /** Medallas de locales desbloqueadas por el usuario (historial, aunque la temporada haya terminado). */
+  async listMedalsForUser(userId: string) {
+    const medals = await this.prisma.userBarMedal.findMany({
+      where: { userId },
+      include: {
+        bar: {
+          select: {
+            id: true,
+            businessName: true,
+            slug: true,
+            logoUrl: true,
+          },
+        },
+        season: {
+          select: {
+            id: true,
+            title: true,
+            medalTitle: true,
+            medalDescription: true,
+            status: true,
+            endsAt: true,
+          },
+        },
+      },
+      orderBy: { unlockedAt: 'desc' },
+    });
+
+    return {
+      items: medals.map((m) => ({
+        id: m.id,
+        unlockedAt: m.unlockedAt.toISOString(),
+        bar: {
+          id: m.bar.id,
+          businessName: m.bar.businessName,
+          slug: m.bar.slug,
+          logoUrl: m.bar.logoUrl,
+        },
+        seasonId: m.season.id,
+        seasonTitle: m.season.title,
+        medalTitle: m.season.medalTitle,
+        medalDescription: m.season.medalDescription,
+        seasonStatus: m.season.status,
+        seasonEndsAt: m.season.endsAt.toISOString(),
+      })),
+    };
+  }
+
   /** Tras canje QR: actualiza progreso de misiones SCAN_* activas del bar. */
   async onQrUnlock(userId: string, barId: string) {
     const now = new Date();
