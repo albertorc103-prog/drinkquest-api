@@ -16,9 +16,11 @@ const NEWS_ROOFTOP_TYPES: NotificationType[] = [
   NotificationType.ROOFTOP_PACKAGE_PUBLISHED,
 ];
 
-/** Inbox de la app (campana): solo etiquetas en publicaciones. */
+/** Inbox de la app (campana): menciones + solicitudes/aceptaciones de amistad. */
 const INBOX_NOTIFICATION_TYPES: NotificationType[] = [
   NotificationType.FEED_MENTION,
+  NotificationType.FRIEND_REQUEST,
+  NotificationType.FRIEND_ACCEPTED,
 ];
 
 export type NewsNotificationCategory = 'cocktails' | 'promotions' | 'rooftop';
