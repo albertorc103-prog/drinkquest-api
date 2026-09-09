@@ -337,6 +337,7 @@ export class UsersService {
     await tx.userGlobalEventProgress.deleteMany({ where: { userId } });
     await tx.userGlobalEventMedal.deleteMany({ where: { userId } });
     await tx.notification.deleteMany({ where: { userId } });
+    await tx.userPromotionActivation.deleteMany({ where: { userId } });
     // Soft-delete no dispara onDelete Cascade: al reactivar el mismo userId no deben volver contactos.
     await tx.friendship.deleteMany({
       where: { OR: [{ userAId: userId }, { userBId: userId }] },

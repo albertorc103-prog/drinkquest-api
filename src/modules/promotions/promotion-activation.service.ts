@@ -17,6 +17,8 @@ import { NotificationsService } from '../notifications/notifications.service';
 
 /** XP al activar una promoción Happy Hour por QR (única vez por usuario/promo). */
 export const PROMOTION_QR_XP_REWARD = 25;
+/** Ventana en que la promo queda “activa” para el usuario tras escanear el QR. */
+export const PROMOTION_ACTIVATION_TTL_MS = 5 * 60 * 60 * 1000;
 
 export interface PromotionActivationResultDto {
   promotionId: string;
@@ -75,26 +77,57 @@ export class PromotionActivationService {
     const existing = await this.prisma.userPromotionActivation.findUnique({
       where: { userId_promotionId: { userId, promotionId: promo.id } },
     });
+    if (existing && existing.expiresAt > now) {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { totalXp: true },
+      });
+      return {
+        promotionId: promo.id,
+        title: promo.title,
+        barId: promo.barId,
+        businessName: promo.bar.businessName,
+        imageUrl: promo.imageUrl,
+        xpEarned: 0,
+        totalXp: user?.totalXp ?? 0,
+        activatedAt: existing.activatedAt.toISOString(),
+        expiresAt: existing.expiresAt.toISOString(),
+        alreadyActive: true,
+      };
+    }
+
+    const activationExpiresAt = new Date(
+      Math.min(now.getTime() + PROMOTION_ACTIVATION_TTL_MS, promo.endsAt.getTime()),
+    );
+    if (activationExpiresAt <= now) {
+      throw new BadRequestException('Esta promoción ya no está vigente.');
+    }
+
+    // Misma promo ya caducada: renovar ventana de 5 h (sin XP extra).
     if (existing) {
-      if (existing.expiresAt > now) {
-        const user = await this.prisma.user.findUnique({
-          where: { id: userId },
-          select: { totalXp: true },
-        });
-        return {
-          promotionId: promo.id,
-          title: promo.title,
-          barId: promo.barId,
-          businessName: promo.bar.businessName,
-          imageUrl: promo.imageUrl,
-          xpEarned: 0,
-          totalXp: user?.totalXp ?? 0,
-          activatedAt: existing.activatedAt.toISOString(),
-          expiresAt: existing.expiresAt.toISOString(),
-          alreadyActive: true,
-        };
-      }
-      throw new BadRequestException('Esta promoción ya expiró para ti.');
+      const updated = await this.prisma.userPromotionActivation.update({
+        where: { id: existing.id },
+        data: {
+          activatedAt: now,
+          expiresAt: activationExpiresAt,
+        },
+      });
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { totalXp: true },
+      });
+      return {
+        promotionId: promo.id,
+        title: promo.title,
+        barId: promo.barId,
+        businessName: promo.bar.businessName,
+        imageUrl: promo.imageUrl,
+        xpEarned: 0,
+        totalXp: user?.totalXp ?? 0,
+        activatedAt: updated.activatedAt.toISOString(),
+        expiresAt: updated.expiresAt.toISOString(),
+        alreadyActive: false,
+      };
     }
 
     const xp = PROMOTION_QR_XP_REWARD;
@@ -105,7 +138,7 @@ export class PromotionActivationService {
           promotionId: promo.id,
           barId: promo.barId,
           xpEarned: xp,
-          expiresAt: promo.endsAt,
+          expiresAt: activationExpiresAt,
         },
       });
       await tx.promotionAnalyticsEvent.create({
@@ -132,7 +165,7 @@ export class PromotionActivationService {
       userId,
       NotificationType.SYSTEM,
       '¡Promoción activada!',
-      `${promo.title} en ${promo.bar.businessName} (+${xp} XP)`,
+      `${promo.title} en ${promo.bar.businessName} (+${xp} XP) · válida 5 h`,
       {
         promotionId: promo.id,
         barId: promo.barId,
@@ -147,6 +180,7 @@ export class PromotionActivationService {
         promotionId: promo.id,
         barId: promo.barId,
         xpEarned: xp,
+        expiresAt: activationExpiresAt.toISOString(),
       }),
     );
 
@@ -166,10 +200,13 @@ export class PromotionActivationService {
 
   async listActiveForUser(userId: string): Promise<ActiveUserPromotionDto[]> {
     const now = new Date();
+    const activatedAfter = new Date(now.getTime() - PROMOTION_ACTIVATION_TTL_MS);
     const rows = await this.prisma.userPromotionActivation.findMany({
       where: {
         userId,
         expiresAt: { gt: now },
+        // Activas antiguas (sin TTL 5 h) no deben quedar eternas en el perfil.
+        activatedAt: { gt: activatedAfter },
         promotion: {
           status: PromotionStatus.ACTIVE,
           approvalStatus: PromotionApprovalStatus.APPROVED,
@@ -186,18 +223,23 @@ export class PromotionActivationService {
       orderBy: { activatedAt: 'desc' },
     });
 
-    return rows.map((row) => ({
-      promotionId: row.promotionId,
-      title: row.promotion.title,
-      description: row.promotion.description,
-      imageUrl: row.promotion.imageUrl,
-      barId: row.barId,
-      businessName: row.promotion.bar.businessName,
-      barLogoUrl: row.promotion.bar.logoUrl,
-      xpEarned: row.xpEarned,
-      activatedAt: row.activatedAt.toISOString(),
-      expiresAt: row.expiresAt.toISOString(),
-    }));
+    return rows.map((row) => {
+      const cappedExpires = new Date(
+        Math.min(row.expiresAt.getTime(), row.activatedAt.getTime() + PROMOTION_ACTIVATION_TTL_MS),
+      );
+      return {
+        promotionId: row.promotionId,
+        title: row.promotion.title,
+        description: row.promotion.description,
+        imageUrl: row.promotion.imageUrl,
+        barId: row.barId,
+        businessName: row.promotion.bar.businessName,
+        barLogoUrl: row.promotion.bar.logoUrl,
+        xpEarned: row.xpEarned,
+        activatedAt: row.activatedAt.toISOString(),
+        expiresAt: cappedExpires.toISOString(),
+      };
+    });
   }
 
   async countActivationsForPromotionIds(
