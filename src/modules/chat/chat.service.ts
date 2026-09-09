@@ -213,6 +213,7 @@ export class ChatService {
     audioUrl?: string | null;
     audioDurationMs?: number | null;
     createdAt: Date;
+    sender?: { displayName?: string | null; avatarUrl?: string | null } | null;
   }) {
     return {
       id: message.id,
@@ -223,6 +224,8 @@ export class ChatService {
       audioUrl: message.audioUrl ?? null,
       audioDurationMs: message.audioDurationMs ?? null,
       createdAt: message.createdAt.toISOString(),
+      senderName: message.sender?.displayName?.trim() || null,
+      senderAvatarUrl: message.sender?.avatarUrl?.trim() || null,
     };
   }
 
@@ -246,7 +249,7 @@ export class ChatService {
       audioUrl?: string | null;
       audioDurationMs?: number | null;
       createdAt: Date;
-      sender?: { displayName?: string | null };
+      sender?: { displayName?: string | null; avatarUrl?: string | null };
     },
   ) {
     const payload = this.toRealtimeMessagePayload(message);
