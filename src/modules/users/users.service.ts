@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
-import { ProfileVisibility, Prisma, User } from '@prisma/client';
+import { ChatRoomType, ProfileVisibility, Prisma, User } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { verifyPassword } from '../../common/utils/crypto.util';
 import {
@@ -338,6 +338,32 @@ export class UsersService {
     await tx.userGlobalEventMedal.deleteMany({ where: { userId } });
     await tx.notification.deleteMany({ where: { userId } });
     await tx.userPromotionActivation.deleteMany({ where: { userId } });
+    // Limpieza de chat al eliminar cuenta:
+    // - DIRECT: borrar sala completa (también elimina mensajes del otro lado).
+    // - GROUP: borrar mensajes enviados por este usuario y su participación.
+    // - Reads: eliminar marcas de lectura del usuario.
+    const chatMemberships = await tx.chatParticipant.findMany({
+      where: { userId },
+      select: {
+        roomId: true,
+        room: { select: { type: true } },
+      },
+    });
+    const directRoomIds = chatMemberships
+      .filter((row) => row.room.type === ChatRoomType.DIRECT)
+      .map((row) => row.roomId);
+    if (directRoomIds.length > 0) {
+      await tx.chatRoom.deleteMany({
+        where: { id: { in: directRoomIds } },
+      });
+    }
+    await tx.messageRead.deleteMany({ where: { userId } });
+    await tx.chatMessage.deleteMany({ where: { senderId: userId } });
+    await tx.chatParticipant.deleteMany({ where: { userId } });
+    await tx.chatRoom.updateMany({
+      where: { createdById: userId },
+      data: { createdById: null },
+    });
     // Soft-delete no dispara onDelete Cascade: al reactivar el mismo userId no deben volver contactos.
     await tx.friendship.deleteMany({
       where: { OR: [{ userAId: userId }, { userBId: userId }] },
