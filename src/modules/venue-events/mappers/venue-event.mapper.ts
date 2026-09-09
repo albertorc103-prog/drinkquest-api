@@ -27,7 +27,8 @@ type VenueEventRow = {
   };
 };
 
-export function mapVenueEvent(row: VenueEventRow, now: Date = new Date()) {
+export function mapVenueEvent(row: VenueEventRow) {
+  const now = new Date();
   const withinWindow = row.endsAt.getTime() >= now.getTime();
   return {
     id: row.id,
