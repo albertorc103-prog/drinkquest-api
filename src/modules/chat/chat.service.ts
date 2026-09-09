@@ -72,14 +72,24 @@ export class ChatService {
   /** Chat comunitario: creador + amigos seleccionados. */
   async createGroup(
     creatorId: string,
-    input: { name: string; avatarUrl?: string; memberIds: string[] },
+    input: {
+      name: string;
+      description?: string;
+      avatarUrl?: string;
+      coverUrl?: string;
+      memberIds: string[];
+    },
   ) {
     const name = input.name?.trim() ?? '';
     if (name.length < 2) {
       throw new BadRequestException('El nombre del grupo debe tener al menos 2 caracteres');
     }
-    if (name.length > 60) {
+    if (name.length > 30) {
       throw new BadRequestException('El nombre del grupo es demasiado largo');
+    }
+    const description = input.description?.trim() || null;
+    if (description && description.length > 100) {
+      throw new BadRequestException('La descripción es demasiado larga');
     }
     const uniqueMembers = [...new Set((input.memberIds ?? []).map((id) => id.trim()).filter(Boolean))];
     const withoutSelf = uniqueMembers.filter((id) => id !== creatorId);
@@ -95,11 +105,14 @@ export class ChatService {
       }
     }
     const avatarUrl = input.avatarUrl?.trim() || null;
+    const coverUrl = input.coverUrl?.trim() || null;
     const room = await this.prisma.chatRoom.create({
       data: {
         type: ChatRoomType.GROUP,
         name,
+        description,
         avatarUrl,
+        coverUrl,
         createdById: creatorId,
         participants: {
           create: [{ userId: creatorId }, ...withoutSelf.map((userId) => ({ userId }))],
@@ -399,7 +412,9 @@ export class ChatService {
       id: string;
       type: ChatRoomType;
       name: string | null;
+      description?: string | null;
       avatarUrl: string | null;
+      coverUrl?: string | null;
       participants: Array<{
         userId: string;
         user: {
@@ -444,7 +459,9 @@ export class ChatService {
       roomId: room.id,
       type: room.type,
       name: isGroup ? room.name : null,
+      description: isGroup ? room.description ?? null : null,
       avatarUrl: isGroup ? room.avatarUrl : null,
+      coverUrl: isGroup ? room.coverUrl ?? null : null,
       memberCount: room.participants.length,
       peer,
       lastMessage: last,

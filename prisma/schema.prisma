@@ -1096,7 +1096,9 @@ model ChatRoom {
   id          String       @id @default(uuid()) @db.Uuid
   type        ChatRoomType @default(DIRECT)
   name        String?
+  description String?
   avatarUrl   String?      @map("avatar_url")
+  coverUrl    String?      @map("cover_url")
   createdById String?      @map("created_by_id") @db.Uuid
   createdAt   DateTime     @default(now()) @map("created_at")
   updatedAt   DateTime     @updatedAt @map("updated_at")

@@ -30,7 +30,14 @@ export class ChatController {
   @Post('groups')
   createGroup(
     @CurrentUser() user: JwtPayload,
-    @Body() body: { name: string; avatarUrl?: string; memberIds: string[] },
+    @Body()
+    body: {
+      name: string;
+      description?: string;
+      avatarUrl?: string;
+      coverUrl?: string;
+      memberIds: string[];
+    },
   ) {
     return this.chat.createGroup(user.sub, body);
   }
