@@ -13,6 +13,45 @@ import { FriendsService } from '../friends/friends.service';
 /** Duración máxima de notas de voz (ms). */
 export const CHAT_VOICE_MAX_MS = 30_000;
 const GROUP_MAX_MEMBERS = 40;
+const ALLOWED_REACTION_EMOJIS = new Set([
+  '👍',
+  '❤️',
+  '😂',
+  '😮',
+  '😢',
+  '🔥',
+  '👏',
+  '🍻',
+  '🎉',
+  '💜',
+]);
+
+const messageSenderSelect = {
+  id: true,
+  displayName: true,
+  avatarUrl: true,
+} as const;
+
+const replyToInclude = {
+  select: {
+    id: true,
+    body: true,
+    imageUrl: true,
+    audioUrl: true,
+    senderId: true,
+    deletedAt: true,
+    sender: { select: { displayName: true } },
+  },
+} as const;
+
+const messageDetailInclude = {
+  sender: { select: messageSenderSelect },
+  reads: true,
+  replyTo: replyToInclude,
+  reactions: {
+    select: { emoji: true, userId: true },
+  },
+} as const;
 
 @Injectable()
 export class ChatService {
@@ -146,6 +185,7 @@ export class ChatService {
     imageUrl?: string,
     audioUrl?: string,
     audioDurationMs?: number,
+    replyToId?: string,
   ) {
     await this.assertParticipant(roomId, senderId);
     const room = await this.prisma.chatRoom.findUnique({
@@ -176,6 +216,18 @@ export class ChatService {
     if (!trimmedBody && !trimmedImage && !trimmedAudio) {
       throw new BadRequestException('Mensaje vacío');
     }
+    let resolvedReplyToId: string | null = null;
+    const replyId = replyToId?.trim();
+    if (replyId) {
+      const parent = await this.prisma.chatMessage.findFirst({
+        where: { id: replyId, roomId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!parent) {
+        throw new BadRequestException('El mensaje al que respondes no existe');
+      }
+      resolvedReplyToId = parent.id;
+    }
     const message = await this.prisma.chatMessage.create({
       data: {
         roomId,
@@ -184,11 +236,9 @@ export class ChatService {
         imageUrl: trimmedImage,
         audioUrl: trimmedAudio,
         audioDurationMs: duration,
+        replyToId: resolvedReplyToId,
       },
-      include: {
-        sender: { select: { id: true, displayName: true, avatarUrl: true } },
-        reads: true,
-      },
+      include: messageDetailInclude,
     });
     // Si el peer había ocultado el chat, vuelve a mostrárselo al recibir mensaje.
     await this.prisma.chatParticipant.updateMany({
@@ -200,46 +250,18 @@ export class ChatService {
       data: { updatedAt: new Date() },
     });
     await this.broadcastMessage(roomId, senderId, message);
-    return message;
+    return this.serializeMessage(message, senderId);
   }
 
   /** Payload estable para Socket.IO (mismos campos que espera la app Android). */
-  toRealtimeMessagePayload(message: {
-    id: string;
-    roomId: string;
-    senderId: string;
-    body: string | null;
-    imageUrl: string | null;
-    audioUrl?: string | null;
-    audioDurationMs?: number | null;
-    createdAt: Date;
-    sender?: { displayName?: string | null; avatarUrl?: string | null } | null;
-  }) {
-    return {
-      id: message.id,
-      roomId: message.roomId,
-      senderId: message.senderId,
-      body: message.body ?? '',
-      imageUrl: message.imageUrl,
-      audioUrl: message.audioUrl ?? null,
-      audioDurationMs: message.audioDurationMs ?? null,
-      createdAt: message.createdAt.toISOString(),
-      senderName: message.sender?.displayName?.trim() || null,
-      senderAvatarUrl: message.sender?.avatarUrl?.trim() || null,
-    };
+  toRealtimeMessagePayload(
+    message: Parameters<ChatService['serializeMessage']>[0],
+    viewerId?: string,
+  ) {
+    return this.serializeMessage(message, viewerId);
   }
 
-  async listRoomIdsForUser(userId: string): Promise<string[]> {
-    const rows = await this.prisma.chatParticipant.findMany({
-      where: { userId },
-      select: { roomId: true },
-    });
-    return rows.map((r) => r.roomId);
-  }
-
-  async broadcastMessage(
-    roomId: string,
-    senderId: string,
+  serializeMessage(
     message: {
       id: string;
       roomId: string;
@@ -249,10 +271,88 @@ export class ChatService {
       audioUrl?: string | null;
       audioDurationMs?: number | null;
       createdAt: Date;
-      sender?: { displayName?: string | null; avatarUrl?: string | null };
+      sender?: { id?: string; displayName?: string | null; avatarUrl?: string | null } | null;
+      replyTo?: {
+        id: string;
+        body: string | null;
+        imageUrl: string | null;
+        audioUrl: string | null;
+        senderId: string;
+        deletedAt: Date | null;
+        sender?: { displayName?: string | null } | null;
+      } | null;
+      reactions?: Array<{ emoji: string; userId: string }>;
     },
+    viewerId?: string,
   ) {
-    const payload = this.toRealtimeMessagePayload(message);
+    return {
+      id: message.id,
+      roomId: message.roomId,
+      senderId: message.senderId,
+      body: message.body ?? '',
+      imageUrl: message.imageUrl,
+      audioUrl: message.audioUrl ?? null,
+      audioDurationMs: message.audioDurationMs ?? null,
+      createdAt: message.createdAt.toISOString(),
+      sender: message.sender
+        ? {
+            id: message.sender.id ?? message.senderId,
+            displayName: message.sender.displayName ?? null,
+            avatarUrl: message.sender.avatarUrl ?? null,
+          }
+        : null,
+      senderName: message.sender?.displayName?.trim() || null,
+      senderAvatarUrl: message.sender?.avatarUrl?.trim() || null,
+      replyTo: this.mapReplyPreview(message.replyTo),
+      reactions: this.aggregateReactions(message.reactions ?? [], viewerId),
+    };
+  }
+
+  private mapReplyPreview(
+    replyTo?: {
+      id: string;
+      body: string | null;
+      imageUrl: string | null;
+      audioUrl: string | null;
+      senderId: string;
+      deletedAt: Date | null;
+      sender?: { displayName?: string | null } | null;
+    } | null,
+  ) {
+    if (!replyTo || replyTo.deletedAt) return null;
+    return {
+      id: replyTo.id,
+      body: replyTo.body ?? '',
+      imageUrl: replyTo.imageUrl,
+      audioUrl: replyTo.audioUrl,
+      senderId: replyTo.senderId,
+      senderName: replyTo.sender?.displayName?.trim() || null,
+    };
+  }
+
+  private aggregateReactions(
+    reactions: Array<{ emoji: string; userId: string }>,
+    viewerId?: string,
+  ) {
+    const map = new Map<string, { emoji: string; count: number; reactedByMe: boolean }>();
+    for (const row of reactions) {
+      const current = map.get(row.emoji) ?? {
+        emoji: row.emoji,
+        count: 0,
+        reactedByMe: false,
+      };
+      current.count += 1;
+      if (viewerId && row.userId === viewerId) current.reactedByMe = true;
+      map.set(row.emoji, current);
+    }
+    return [...map.values()].sort((a, b) => b.count - a.count || a.emoji.localeCompare(b.emoji));
+  }
+
+  async broadcastMessage(
+    roomId: string,
+    senderId: string,
+    message: Parameters<ChatService['serializeMessage']>[0],
+  ) {
     const [participants, room] = await Promise.all([
       this.prisma.chatParticipant.findMany({
         where: { roomId },
@@ -266,7 +366,11 @@ export class ChatService {
     const preview =
       message.body?.trim() ||
       (message.audioUrl ? '🎤 Nota de voz' : null) ||
-      (message.imageUrl ? '📷 Foto' : 'Nuevo mensaje');
+      (message.imageUrl
+        ? looksLikeGifUrl(message.imageUrl)
+          ? '🎞️ GIF'
+          : '📷 Foto'
+        : 'Nuevo mensaje');
     const senderName = message.sender?.displayName?.trim() || 'Alguien';
     const notifTitle =
       room?.type === ChatRoomType.GROUP && room.name?.trim()
@@ -274,6 +378,7 @@ export class ChatService {
         : senderName;
 
     for (const p of participants) {
+      const payload = this.toRealtimeMessagePayload(message, p.userId);
       // Entrega por usuario: llega aunque el cliente no haya hecho join_room en esa sala.
       this.realtime.emitToUser(p.userId, 'message', payload);
       if (p.userId === senderId) continue;
@@ -301,12 +406,68 @@ export class ChatService {
       where: { roomId, deletedAt: null, ...(cursor && { id: { lt: cursor } }) },
       orderBy: { createdAt: 'desc' },
       take: limit,
-      include: {
-        sender: { select: { id: true, displayName: true, avatarUrl: true } },
-        reads: true,
+      include: messageDetailInclude,
+    });
+    return rows.reverse().map((row) => this.serializeMessage(row, userId));
+  }
+
+  async toggleReaction(messageId: string, userId: string, emojiRaw: string) {
+    const emoji = emojiRaw?.trim();
+    if (!emoji || !ALLOWED_REACTION_EMOJIS.has(emoji)) {
+      throw new BadRequestException('Emoji de reacción no permitido');
+    }
+    const message = await this.prisma.chatMessage.findFirst({
+      where: { id: messageId, deletedAt: null },
+      select: { id: true, roomId: true },
+    });
+    if (!message) throw new BadRequestException('Mensaje no encontrado');
+    await this.assertParticipant(message.roomId, userId);
+
+    const existing = await this.prisma.messageReaction.findUnique({
+      where: {
+        messageId_userId_emoji: {
+          messageId,
+          userId,
+          emoji,
+        },
       },
     });
-    return rows.reverse();
+    if (existing) {
+      await this.prisma.messageReaction.delete({ where: { id: existing.id } });
+    } else {
+      await this.prisma.messageReaction.create({
+        data: { messageId, userId, emoji },
+      });
+    }
+
+    const reactions = await this.prisma.messageReaction.findMany({
+      where: { messageId },
+      select: { emoji: true, userId: true },
+    });
+    const participants = await this.prisma.chatParticipant.findMany({
+      where: { roomId: message.roomId },
+      select: { userId: true },
+    });
+    for (const p of participants) {
+      this.realtime.emitToUser(p.userId, 'reaction_updated', {
+        messageId,
+        roomId: message.roomId,
+        reactions: this.aggregateReactions(reactions, p.userId),
+      });
+    }
+    return {
+      messageId,
+      roomId: message.roomId,
+      reactions: this.aggregateReactions(reactions, userId),
+    };
+  }
+
+  async listRoomIdsForUser(userId: string): Promise<string[]> {
+    const rows = await this.prisma.chatParticipant.findMany({
+      where: { userId },
+      select: { roomId: true },
+    });
+    return rows.map((r) => r.roomId);
   }
 
   async markRead(messageId: string, userId: string, roomId?: string) {
@@ -499,4 +660,16 @@ export class ChatService {
     ]);
     return { chatUnread, pendingRequests, notificationUnread };
   }
+}
+
+function looksLikeGifUrl(url: string): boolean {
+  const value = url.trim().toLowerCase();
+  if (!value) return false;
+  return (
+    value.includes('.gif') ||
+    value.includes('media.tenor.com') ||
+    value.includes('media.giphy.com') ||
+    value.includes('giphy.com/media') ||
+    value.includes('tenor.com/')
+  );
 }

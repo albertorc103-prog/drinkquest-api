@@ -100,11 +100,28 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   @SubscribeMessage('send_message')
   async sendMessage(
     @ConnectedSocket() client: Socket,
-    @MessageBody() body: { roomId: string; text?: string; imageUrl?: string },
+    @MessageBody() body: { roomId: string; text?: string; imageUrl?: string; replyToId?: string },
   ) {
     const userId = client.data.userId as string;
-    const message = await this.chat.sendMessage(body.roomId, userId, body.text, body.imageUrl);
+    const message = await this.chat.sendMessage(
+      body.roomId,
+      userId,
+      body.text,
+      body.imageUrl,
+      undefined,
+      undefined,
+      body.replyToId,
+    );
     return message;
+  }
+
+  @SubscribeMessage('toggle_reaction')
+  async toggleReaction(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { messageId: string; emoji: string },
+  ) {
+    const userId = client.data.userId as string;
+    return this.chat.toggleReaction(body.messageId, userId, body.emoji);
   }
 
   @SubscribeMessage('read_message')

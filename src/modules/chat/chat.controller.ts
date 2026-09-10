@@ -61,6 +61,7 @@ export class ChatController {
       imageUrl?: string;
       audioUrl?: string;
       audioDurationMs?: number;
+      replyToId?: string;
     },
   ) {
     return this.chat.sendMessage(
@@ -70,7 +71,17 @@ export class ChatController {
       body.imageUrl,
       body.audioUrl,
       body.audioDurationMs,
+      body.replyToId,
     );
+  }
+
+  @Post('messages/:messageId/reactions')
+  toggleReaction(
+    @CurrentUser() user: JwtPayload,
+    @Param('messageId') messageId: string,
+    @Body() body: { emoji: string },
+  ) {
+    return this.chat.toggleReaction(messageId, user.sub, body.emoji);
   }
 
   @Post('rooms/:roomId/read')

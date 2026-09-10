@@ -311,6 +311,7 @@ model User {
   chatMemberships     ChatParticipant[]
   messagesSent        ChatMessage[]
   messageReads        MessageRead[]
+  messageReactions    MessageReaction[]
   drinkUnlocks        UserDrinkUnlock[]
   drinkHistory        DrinkHistoryEntry[]
   favoriteDrinks      UserFavoriteDrink[]
@@ -1137,15 +1138,20 @@ model ChatMessage {
   imageKey         String?   @map("image_key")
   audioUrl         String?   @map("audio_url")
   audioDurationMs  Int?      @map("audio_duration_ms")
+  replyToId        String?   @map("reply_to_id") @db.Uuid
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
   deletedAt        DateTime? @map("deleted_at")
 
-  room   ChatRoom      @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  sender User          @relation(fields: [senderId], references: [id], onDelete: Cascade)
-  reads  MessageRead[]
+  room      ChatRoom          @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  sender    User              @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  replyTo   ChatMessage?      @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies   ChatMessage[]     @relation("MessageReplies")
+  reads     MessageRead[]
+  reactions MessageReaction[]
 
   @@index([roomId, createdAt])
+  @@index([replyToId])
   @@map("chat_messages")
 }
 
@@ -1160,6 +1166,21 @@ model MessageRead {
 
   @@unique([messageId, userId])
   @@map("message_reads")
+}
+
+model MessageReaction {
+  id        String   @id @default(uuid()) @db.Uuid
+  messageId String   @map("message_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  emoji     String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  message ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])
+  @@index([messageId])
+  @@map("message_reactions")
 }
 
 model FeedPost {
