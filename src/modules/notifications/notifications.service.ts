@@ -23,6 +23,41 @@ const INBOX_NOTIFICATION_TYPES: NotificationType[] = [
   NotificationType.FRIEND_ACCEPTED,
 ];
 
+const RESERVATION_PUSH_TYPES: NotificationType[] = [
+  NotificationType.RESERVATION_CREATED,
+  NotificationType.RESERVATION_CONFIRMED,
+  NotificationType.RESERVATION_DECLINED,
+  NotificationType.RESERVATION_CANCELLED,
+];
+
+const MODERATION_PUSH_TYPES: NotificationType[] = [
+  NotificationType.SPECIAL_DRINK_APPROVED,
+  NotificationType.SPECIAL_DRINK_REJECTED,
+  NotificationType.SPECIAL_DRINK_FLAGGED,
+  NotificationType.PROMOTION_APPROVED,
+  NotificationType.PROMOTION_REJECTED,
+  NotificationType.PROMOTION_FLAGGED,
+  NotificationType.ROOFTOP_VERIFIED,
+  NotificationType.ROOFTOP_REJECTED,
+  NotificationType.ROOFTOP_PACKAGE_APPROVED,
+  NotificationType.ROOFTOP_PACKAGE_REJECTED,
+  NotificationType.ROOFTOP_PACKAGE_FLAGGED,
+];
+
+export type NotificationPreferencesDto = {
+  pushEnabled: boolean;
+  reservationsEnabled: boolean;
+  moderationEnabled: boolean;
+  chatEnabled: boolean;
+};
+
+const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferencesDto = {
+  pushEnabled: true,
+  reservationsEnabled: true,
+  moderationEnabled: true,
+  chatEnabled: true,
+};
+
 export type NewsNotificationCategory = 'cocktails' | 'promotions' | 'rooftop';
 
 function typesForNewsCategory(category: NewsNotificationCategory): NotificationType[] {
@@ -67,6 +102,52 @@ export class NotificationsService {
       where: { userId, token: token.trim() },
     });
     return { ok: true };
+  }
+
+  async getPreferences(userId: string): Promise<NotificationPreferencesDto> {
+    const row = await this.prisma.userNotificationPreferences.findUnique({
+      where: { userId },
+    });
+    if (!row) return { ...DEFAULT_NOTIFICATION_PREFERENCES };
+    return {
+      pushEnabled: row.pushEnabled,
+      reservationsEnabled: row.reservationsEnabled,
+      moderationEnabled: row.moderationEnabled,
+      chatEnabled: row.chatEnabled,
+    };
+  }
+
+  async updatePreferences(
+    userId: string,
+    patch: Partial<NotificationPreferencesDto>,
+  ): Promise<NotificationPreferencesDto> {
+    const data: Prisma.UserNotificationPreferencesUpdateInput = {};
+    if (typeof patch.pushEnabled === 'boolean') data.pushEnabled = patch.pushEnabled;
+    if (typeof patch.reservationsEnabled === 'boolean') {
+      data.reservationsEnabled = patch.reservationsEnabled;
+    }
+    if (typeof patch.moderationEnabled === 'boolean') {
+      data.moderationEnabled = patch.moderationEnabled;
+    }
+    if (typeof patch.chatEnabled === 'boolean') data.chatEnabled = patch.chatEnabled;
+
+    const row = await this.prisma.userNotificationPreferences.upsert({
+      where: { userId },
+      create: {
+        userId,
+        pushEnabled: patch.pushEnabled ?? true,
+        reservationsEnabled: patch.reservationsEnabled ?? true,
+        moderationEnabled: patch.moderationEnabled ?? true,
+        chatEnabled: patch.chatEnabled ?? true,
+      },
+      update: data,
+    });
+    return {
+      pushEnabled: row.pushEnabled,
+      reservationsEnabled: row.reservationsEnabled,
+      moderationEnabled: row.moderationEnabled,
+      chatEnabled: row.chatEnabled,
+    };
   }
 
   async create(
@@ -252,6 +333,7 @@ export class NotificationsService {
     payload?: Prisma.InputJsonValue,
   ) {
     try {
+      if (!(await this.shouldSendPush(userId, type))) return;
       const data = this.fcmData(type, payload);
       const roomId = data.roomId?.trim();
       const isChat = type === NotificationType.CHAT_MESSAGE && !!roomId;
@@ -266,6 +348,15 @@ export class NotificationsService {
         `Push FCM omitido: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+  }
+
+  private async shouldSendPush(userId: string, type: NotificationType): Promise<boolean> {
+    const prefs = await this.getPreferences(userId);
+    if (!prefs.pushEnabled) return false;
+    if (RESERVATION_PUSH_TYPES.includes(type)) return prefs.reservationsEnabled;
+    if (MODERATION_PUSH_TYPES.includes(type)) return prefs.moderationEnabled;
+    if (type === NotificationType.CHAT_MESSAGE) return prefs.chatEnabled;
+    return true;
   }
 
   private fcmData(

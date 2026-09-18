@@ -80,6 +80,7 @@ export class ReservationsService {
   }
 
   async listForUser(userId: string) {
+    await this.expirePastReservations({ userId });
     const rows = await this.prisma.barReservation.findMany({
       where: { userId },
       include: {
@@ -187,6 +188,7 @@ export class ReservationsService {
 
   async listForBarOwner(ownerUserId: string, status?: string) {
     const { bar } = await this.assertOwnerLegend(ownerUserId);
+    await this.expirePastReservations({ barId: bar.id });
     const whereStatus =
       status && Object.values(BarReservationStatus).includes(status as BarReservationStatus)
         ? (status as BarReservationStatus)
@@ -216,6 +218,7 @@ export class ReservationsService {
 
   async confirm(ownerUserId: string, reservationId: string, barResponse?: string) {
     const row = await this.requireOwnedReservation(ownerUserId, reservationId);
+    await this.ensureNotExpired(row);
     if (row.status !== BarReservationStatus.PENDING) {
       throw new BadRequestException('Solo se pueden confirmar reservas pendientes.');
     }
@@ -256,6 +259,7 @@ export class ReservationsService {
 
   async decline(ownerUserId: string, reservationId: string, barResponse?: string) {
     const row = await this.requireOwnedReservation(ownerUserId, reservationId);
+    await this.ensureNotExpired(row);
     if (row.status !== BarReservationStatus.PENDING) {
       throw new BadRequestException('Solo se pueden rechazar reservas pendientes.');
     }
@@ -365,6 +369,74 @@ export class ReservationsService {
     }
     await this.prisma.barReservation.delete({ where: { id: row.id } });
     return { deleted: true as const };
+  }
+
+  /**
+   * Cancela automáticamente pendientes/confirmadas cuya fecha/hora ya pasó.
+   * Se invoca al listar para mantener el estado al día sin cron.
+   */
+  private async expirePastReservations(scope?: { userId?: string; barId?: string }) {
+    const now = new Date();
+    const expired = await this.prisma.barReservation.findMany({
+      where: {
+        reservedFor: { lt: now },
+        status: {
+          in: [BarReservationStatus.PENDING, BarReservationStatus.CONFIRMED],
+        },
+        ...(scope?.userId ? { userId: scope.userId } : {}),
+        ...(scope?.barId ? { barId: scope.barId } : {}),
+      },
+      include: {
+        bar: {
+          select: {
+            id: true,
+            businessName: true,
+          },
+        },
+      },
+    });
+    if (expired.length === 0) return;
+
+    await this.prisma.barReservation.updateMany({
+      where: { id: { in: expired.map((row) => row.id) } },
+      data: {
+        status: BarReservationStatus.CANCELLED,
+        resolvedAt: now,
+        barResponse: 'Cancelada automáticamente: la fecha de la reserva ya pasó.',
+      },
+    });
+
+    for (const row of expired) {
+      await this.notifications.create(
+        row.userId,
+        NotificationType.RESERVATION_CANCELLED,
+        'Reserva cancelada automáticamente',
+        `Tu reserva en ${row.bar.businessName} del ${formatReservationWhen(row.reservedFor)} se canceló porque la fecha ya pasó.`,
+        {
+          reservationId: row.id,
+          barId: row.barId,
+          category: 'reservations',
+          autoExpired: true,
+        },
+      );
+    }
+  }
+
+  private async ensureNotExpired(row: {
+    barId: string;
+    reservedFor: Date;
+    status: BarReservationStatus;
+  }) {
+    if (row.reservedFor.getTime() > Date.now()) return;
+    if (
+      row.status === BarReservationStatus.PENDING ||
+      row.status === BarReservationStatus.CONFIRMED
+    ) {
+      await this.expirePastReservations({ barId: row.barId });
+    }
+    throw new BadRequestException(
+      'Esta reserva ya caducó y se canceló automáticamente.',
+    );
   }
 
   private assertPartySize(partySize: number) {

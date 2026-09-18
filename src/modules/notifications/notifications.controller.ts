@@ -7,6 +7,7 @@ import {
   RegisterDeviceTokenDto,
   UnregisterDeviceTokenDto,
 } from './dto/device-token.dto';
+import { UpdateNotificationPreferencesDto } from './dto/notification-preferences.dto';
 import { NotificationsService } from './notifications.service';
 
 @ApiTags('notifications')
@@ -29,6 +30,19 @@ export class NotificationsController {
   @Get('unread-by-category')
   unreadByCategory(@CurrentUser() user: JwtPayload) {
     return this.notifications.unreadByCategory(user.sub);
+  }
+
+  @Get('preferences')
+  getPreferences(@CurrentUser() user: JwtPayload) {
+    return this.notifications.getPreferences(user.sub);
+  }
+
+  @Patch('preferences')
+  updatePreferences(
+    @CurrentUser() user: JwtPayload,
+    @Body() body: UpdateNotificationPreferencesDto,
+  ) {
+    return this.notifications.updatePreferences(user.sub, body);
   }
 
   @Post('device-tokens')

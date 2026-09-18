@@ -329,6 +329,7 @@ model User {
   postCommentLikes    PostCommentLike[]
   notifications       Notification[]
   deviceTokens        DeviceToken[]
+  notificationPreferences UserNotificationPreferences?
   reportsFiled        Report[]              @relation("ReportReporter")
   reportsReceived     Report[]              @relation("ReportTargetUser")
   qrSessionsScanned   QrSession[]           @relation("QrScannedBy")
@@ -1327,4 +1328,19 @@ model DeviceToken {
 
   @@index([userId])
   @@map("device_tokens")
+}
+
+/** Preferencias de push FCM por usuario (defaults: todo activo). */
+model UserNotificationPreferences {
+  userId              String   @id @map("user_id") @db.Uuid
+  pushEnabled         Boolean  @default(true) @map("push_enabled")
+  reservationsEnabled Boolean  @default(true) @map("reservations_enabled")
+  moderationEnabled   Boolean  @default(true) @map("moderation_enabled")
+  chatEnabled         Boolean  @default(true) @map("chat_enabled")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_notification_preferences")
 }
