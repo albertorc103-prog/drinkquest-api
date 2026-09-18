@@ -114,6 +114,12 @@ enum SubscriptionPlan {
   PRO
 }
 
+/// Tier de recompensa XP al momento del check-in (histórico; no define futuras visitas).
+enum PlaceVisitRewardTier {
+  SUBSCRIBED
+  STANDARD
+}
+
 /// Eventos de ciclo de vida (admin, sistema, Stripe futuro).
 enum SubscriptionEventType {
   ACTIVATED
@@ -334,6 +340,7 @@ model User {
   reportsReceived     Report[]              @relation("ReportTargetUser")
   qrSessionsScanned   QrSession[]           @relation("QrScannedBy")
   createdChatRooms    ChatRoom[]            @relation("ChatRoomCreator")
+  placeVisits         PlaceVisit[]
 
   @@index([email])
   @@index([role])
@@ -398,6 +405,10 @@ model Bar {
   bannerUrl    String?  @map("banner_url")
   latitude     Float?
   longitude    Float?
+  /// Identidad Google Places del local (UNIQUE). No crear ExternalPlace si es null.
+  googlePlaceId String? @unique @map("google_place_id")
+  /// Radio de check-in en metros; null → CHECK_IN_RADIUS_METERS (50).
+  checkInRadiusMeters Int? @map("check_in_radius_meters")
   /// Horario de apertura estructurado: { days: [{ day, closed, open, close }] }
   openingHours Json?    @map("opening_hours")
   isVerified   Boolean  @default(false) @map("is_verified")
@@ -425,11 +436,62 @@ model Bar {
   reservations    BarReservation[]
   globalEventBars GlobalEventBar[]
   magazineEditorials MagazineEditorial[]
+  placeVisits     PlaceVisit[]
 
   @@index([slug])
   @@index([deletedAt])
   @@index([rooftopStatus])
   @@map("bars")
+}
+
+/// Caché de POI Google Places. NO es Bar, usuario negocio ni suscripción.
+/// place_id: permanente. lat/lng: máx. 30 días (Google Maps Platform SST §14.3).
+model ExternalPlace {
+  id                 String    @id @default(uuid()) @db.Uuid
+  googlePlaceId      String    @unique @map("google_place_id")
+  name               String?
+  latitude           Float?
+  longitude          Float?
+  primaryType        String?   @map("primary_type")
+  city               String?
+  contentCachedAt    DateTime? @map("content_cached_at")
+  placeIdRefreshedAt DateTime? @map("place_id_refreshed_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  visits PlaceVisit[]
+
+  @@map("external_places")
+}
+
+/// Visita válida a un lugar (Bar DrinkQuest y/o ExternalPlace Google).
+model PlaceVisit {
+  id              String               @id @default(uuid()) @db.Uuid
+  userId          String               @map("user_id") @db.Uuid
+  barId           String?              @map("bar_id") @db.Uuid
+  externalPlaceId String?              @map("external_place_id") @db.Uuid
+  /// Identidad canónica cuando el POI tiene Google Place ID (unifica External ↔ Bar).
+  googlePlaceId   String?              @map("google_place_id")
+  visitDate       DateTime             @map("visit_date") @db.Date
+  visitedAt       DateTime             @map("visited_at")
+  latitude        Float
+  longitude       Float
+  accuracy        Float?
+  distanceMeters  Float                @map("distance_meters")
+  xpAwarded       Int                  @map("xp_awarded")
+  firstVisit      Boolean              @map("first_visit")
+  rewardTier      PlaceVisitRewardTier @map("reward_tier")
+  createdAt       DateTime             @default(now()) @map("created_at")
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bar           Bar?           @relation(fields: [barId], references: [id], onDelete: SetNull)
+  externalPlace ExternalPlace? @relation(fields: [externalPlaceId], references: [id], onDelete: SetNull)
+
+  @@index([userId, visitedAt])
+  @@index([userId, googlePlaceId, visitedAt])
+  @@index([userId, barId, visitedAt])
+  @@index([userId, externalPlaceId, visitedAt])
+  @@map("place_visits")
 }
 
 /// Evento publicitario del lugar (Legend). Publicación directa con aceptación de políticas;

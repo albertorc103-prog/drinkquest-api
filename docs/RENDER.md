@@ -63,6 +63,10 @@ MINIO_PUBLIC_URL=https://tu-bucket.s3.amazonaws.com/drinkquest
 
 MAIL_ENABLED=false
 
+# Quest Places — Place Details (New) en backend (independiente de Android)
+# Google Cloud → Credentials → API key restringida a Places API (New) + IP/server si aplica
+GOOGLE_PLACES_API_KEY=<tu-api-key-servidor>
+
 # Opcional: admin creado automáticamente en cada deploy (seed idempotente)
 SEED_ADMIN_EMAIL=admin@drinkquest.app
 SEED_ADMIN_PASSWORD=<tu-contraseña-segura>
