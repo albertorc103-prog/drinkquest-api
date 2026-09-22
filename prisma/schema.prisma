@@ -341,6 +341,7 @@ model User {
   qrSessionsScanned   QrSession[]           @relation("QrScannedBy")
   createdChatRooms    ChatRoom[]            @relation("ChatRoomCreator")
   placeVisits         PlaceVisit[]
+  placeReviews        PlaceReview[]
 
   @@index([email])
   @@index([role])
@@ -437,6 +438,7 @@ model Bar {
   globalEventBars GlobalEventBar[]
   magazineEditorials MagazineEditorial[]
   placeVisits     PlaceVisit[]
+  placeReviews    PlaceReview[]
 
   @@index([slug])
   @@index([deletedAt])
@@ -459,7 +461,8 @@ model ExternalPlace {
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @updatedAt @map("updated_at")
 
-  visits PlaceVisit[]
+  visits  PlaceVisit[]
+  reviews PlaceReview[]
 
   @@map("external_places")
 }
@@ -492,6 +495,29 @@ model PlaceVisit {
   @@index([userId, barId, visitedAt])
   @@index([userId, externalPlaceId, visitedAt])
   @@map("place_visits")
+}
+
+/// Calificación y opinión de un usuario sobre un lugar (Bar y/o Google Place).
+/// Una opinión por usuario e identidad canónica (googlePlaceId o barId).
+model PlaceReview {
+  id              String   @id @default(uuid()) @db.Uuid
+  userId          String   @map("user_id") @db.Uuid
+  barId           String?  @map("bar_id") @db.Uuid
+  externalPlaceId String?  @map("external_place_id") @db.Uuid
+  googlePlaceId   String?  @map("google_place_id")
+  rating          Int
+  comment         String?
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bar           Bar?           @relation(fields: [barId], references: [id], onDelete: SetNull)
+  externalPlace ExternalPlace? @relation(fields: [externalPlaceId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([googlePlaceId, createdAt])
+  @@index([barId, createdAt])
+  @@map("place_reviews")
 }
 
 /// Evento publicitario del lugar (Legend). Publicación directa con aceptación de políticas;

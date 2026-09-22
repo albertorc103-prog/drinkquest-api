@@ -1,9 +1,11 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { CheckInPlaceDto } from './dto/check-in-place.dto';
+import { PlaceReviewQueryDto, UpsertPlaceReviewDto } from './dto/place-review.dto';
+import { PlaceReviewsService } from './place-reviews.service';
 import { PlaceVisitsService } from './place-visits.service';
 
 @ApiTags('places')
@@ -11,7 +13,10 @@ import { PlaceVisitsService } from './place-visits.service';
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 export class PlaceVisitsController {
-  constructor(private readonly placeVisits: PlaceVisitsService) {}
+  constructor(
+    private readonly placeVisits: PlaceVisitsService,
+    private readonly placeReviews: PlaceReviewsService,
+  ) {}
 
   @Post('check-in')
   @ApiOperation({
@@ -25,5 +30,23 @@ export class PlaceVisitsController {
   @ApiOperation({ summary: 'Mis lugares (colección unificada)' })
   myVisited(@CurrentUser() user: JwtPayload) {
     return this.placeVisits.listMyVisitedPlaces(user.sub);
+  }
+
+  @Get('reviews')
+  @ApiOperation({ summary: 'Opiniones y promedio de un lugar' })
+  listReviews(
+    @CurrentUser() user: JwtPayload,
+    @Query() query: PlaceReviewQueryDto,
+  ) {
+    return this.placeReviews.listForPlace(user.sub, query);
+  }
+
+  @Post('reviews')
+  @ApiOperation({ summary: 'Publicar o actualizar mi calificación/opinión' })
+  upsertReview(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: UpsertPlaceReviewDto,
+  ) {
+    return this.placeReviews.upsert(user.sub, dto);
   }
 }
