@@ -53,7 +53,7 @@ export class PlaceBarDrinksService {
         orderBy: { createdAt: 'desc' },
         take: 20,
         include: {
-          materializedDrink: { select: { id: true } },
+          materializedDrink: { select: { id: true, imageUrl: true, imageKey: true } },
         },
       }),
       this.prisma.barMenuItem.findMany({
@@ -71,6 +71,7 @@ export class PlaceBarDrinksService {
               name: true,
               rarity: true,
               imageUrl: true,
+              imageKey: true,
               description: true,
               sourceSpecialDrinkId: true,
               deletedAt: true,
@@ -80,26 +81,53 @@ export class PlaceBarDrinksService {
       }),
     ]);
 
+    const houseSpecials = specials.map((row) => {
+      const mapped = mapSpecialDrink(row);
+      return {
+        ...mapped,
+        // Preferir URL de la especial; si falta, la del drink materializado.
+        imageUrl:
+          mapped.imageUrl ||
+          row.materializedDrink?.imageUrl ||
+          null,
+        catalogDrinkId: row.materializedDrink?.id ?? null,
+      };
+    });
+
+    const houseDrinkIds = new Set(
+      houseSpecials
+        .map((s) => s.catalogDrinkId)
+        .filter((id): id is string => Boolean(id)),
+    );
+    const houseSpecialIds = new Set(specials.map((s) => s.id));
+
+    // Carta estándar: sin repetir bebidas de la casa (especiales materializadas).
     const menuDrinks = menuItems
       .filter((m) => m.drink && m.drink.deletedAt == null)
+      .filter((m) => {
+        const drink = m.drink!;
+        if (drink.sourceSpecialDrinkId && houseSpecialIds.has(drink.sourceSpecialDrinkId)) {
+          return false;
+        }
+        if (houseDrinkIds.has(drink.id)) return false;
+        return true;
+      })
       .map((m) => ({
         drinkId: m.drink!.id,
         name: m.drink!.name,
         rarity: m.drink!.rarity,
         imageUrl: m.drink!.imageUrl,
+        imageKey: m.drink!.imageKey,
         description: m.drink!.description,
         featured: m.featured,
-        isHouseSpecial: m.drink!.sourceSpecialDrinkId != null,
+        isHouseSpecial: false,
       }));
 
     return {
       barId: bar.id,
       barName: bar.businessName,
       drinkQuestPartner: true,
-      houseSpecials: specials.map((row) => ({
-        ...mapSpecialDrink(row),
-        catalogDrinkId: row.materializedDrink?.id ?? null,
-      })),
+      houseSpecials,
       menuDrinks,
     };
   }
