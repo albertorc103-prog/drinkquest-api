@@ -1,10 +1,11 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { CheckInPlaceDto } from './dto/check-in-place.dto';
 import { PlaceReviewQueryDto, UpsertPlaceReviewDto } from './dto/place-review.dto';
+import { PlaceBarDrinksService } from './place-bar-drinks.service';
 import { PlaceReviewsService } from './place-reviews.service';
 import { PlaceVisitsService } from './place-visits.service';
 
@@ -16,6 +17,7 @@ export class PlaceVisitsController {
   constructor(
     private readonly placeVisits: PlaceVisitsService,
     private readonly placeReviews: PlaceReviewsService,
+    private readonly placeBarDrinks: PlaceBarDrinksService,
   ) {}
 
   @Post('check-in')
@@ -30,6 +32,14 @@ export class PlaceVisitsController {
   @ApiOperation({ summary: 'Mis lugares (colección unificada)' })
   myVisited(@CurrentUser() user: JwtPayload) {
     return this.placeVisits.listMyVisitedPlaces(user.sub);
+  }
+
+  @Get('bars/:barId/drinks')
+  @ApiOperation({
+    summary: 'Bebidas de la casa y menú activo de un bar DrinkQuest',
+  })
+  barDrinks(@Param('barId') barId: string) {
+    return this.placeBarDrinks.listForBar(barId);
   }
 
   @Get('reviews')

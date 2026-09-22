@@ -41,6 +41,8 @@ export class MyVisitedPlaceDto {
   primaryType?: string | null;
   city?: string | null;
   logoUrl?: string | null;
+  /** Suma de XP otorgado en visitas a este lugar. */
+  totalXpAwarded?: number;
 }
 
 export class MyVisitedPlacesResponseDto {

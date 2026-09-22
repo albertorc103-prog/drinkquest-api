@@ -245,7 +245,10 @@ export class PlaceVisitsService {
       },
     });
 
-    const map = new Map<string, MyVisitedPlaceDto & { _first: Date; _last: Date }>();
+    const map = new Map<
+      string,
+      MyVisitedPlaceDto & { _first: Date; _last: Date; _xp: number }
+    >();
 
     for (const v of visits) {
       const key = collectionKey({
@@ -257,6 +260,7 @@ export class PlaceVisitsService {
       const existing = map.get(key);
       if (existing) {
         existing.visitCount += 1;
+        existing._xp += v.xpAwarded;
         if (v.visitedAt < existing._first) existing._first = v.visitedAt;
         if (v.visitedAt > existing._last) existing._last = v.visitedAt;
         // Preferir barId/external más recientes si aparecen.
@@ -287,8 +291,10 @@ export class PlaceVisitsService {
         primaryType: v.externalPlace?.primaryType ?? null,
         city: v.bar?.city ?? v.externalPlace?.city ?? null,
         logoUrl: v.bar?.logoUrl ?? null,
+        totalXpAwarded: v.xpAwarded,
         _first: v.visitedAt,
         _last: v.visitedAt,
+        _xp: v.xpAwarded,
       });
     }
 
@@ -334,8 +340,9 @@ export class PlaceVisitsService {
     }
 
     const items: MyVisitedPlaceDto[] = [...map.values()]
-      .map(({ _first, _last, ...rest }) => ({
+      .map(({ _first, _last, _xp, ...rest }) => ({
         ...rest,
+        totalXpAwarded: _xp,
         firstVisitAt: _first.toISOString(),
         lastVisitAt: _last.toISOString(),
       }))
