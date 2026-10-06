@@ -21,4 +21,9 @@ export class RealtimeHub {
   emitGlobal(event: string, payload: unknown) {
     this.server?.emit(event, payload);
   }
+
+  /** Desconecta sockets activos del usuario (logout-all / password change / reset). */
+  disconnectUser(userId: string) {
+    this.server?.in(`user:${userId}`).disconnectSockets(true);
+  }
 }

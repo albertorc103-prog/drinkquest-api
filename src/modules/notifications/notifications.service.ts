@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { NotificationType, Prisma, Role } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { RealtimeHub } from '../../common/realtime/realtime-hub.service';
@@ -83,6 +83,11 @@ export class NotificationsService {
 
   async registerDeviceToken(userId: string, token: string, platform = 'android') {
     const trimmed = token.trim();
+    if (!trimmed) {
+      throw new BadRequestException('Token FCM vacío');
+    }
+    // Reasignación solo vía JWT del caller: el token FCM es del dispositivo,
+    // no se puede asociar a otra cuenta sin conocer el token + estar autenticado.
     const existing = await this.prisma.deviceToken.findUnique({
       where: { token: trimmed },
     });
@@ -156,15 +161,80 @@ export class NotificationsService {
     title: string,
     body?: string,
     payload?: Prisma.InputJsonValue,
+    options?: { dedupeKey?: string },
   ) {
-    const row = await this.prisma.notification.create({
-      data: { userId, type, title, body, payload },
+    const row = await this.persistNotification(userId, type, title, body, payload, {
+      dedupeKey: options?.dedupeKey,
     });
-    this.realtime.emitToUser(userId, 'notification', row);
-    const summary = await this.messengerSummary(userId);
-    this.realtime.emitToUser(userId, 'messenger_summary', summary);
-    void this.pushSafe(userId, title, body, type, payload);
+    await this.deliverAfterPersist(userId, row);
     return row;
+  }
+
+  /**
+   * Persistencia sin FCM/realtime (para TX de unlock).
+   * Si dedupeKey ya existe → retorna la fila existente (idempotente).
+   */
+  async persistNotification(
+    userId: string,
+    type: NotificationType,
+    title: string,
+    body: string | undefined,
+    payload: Prisma.InputJsonValue | undefined,
+    options?: { dedupeKey?: string; tx?: Prisma.TransactionClient },
+  ) {
+    const db = options?.tx ?? this.prisma;
+    try {
+      return await db.notification.create({
+        data: {
+          userId,
+          type,
+          title,
+          body,
+          payload,
+          dedupeKey: options?.dedupeKey ?? null,
+        },
+      });
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002' &&
+        options?.dedupeKey
+      ) {
+        const existing = await db.notification.findUnique({
+          where: { dedupeKey: options.dedupeKey },
+        });
+        if (existing) return existing;
+      }
+      throw err;
+    }
+  }
+
+  /** Side effects post-commit: inbox realtime + FCM (fallos FCM no propagan). */
+  async deliverAfterPersist(
+    userId: string,
+    row: {
+      type: NotificationType;
+      title: string;
+      body: string | null;
+      payload: Prisma.JsonValue | null;
+    },
+  ) {
+    try {
+      this.realtime.emitToUser(userId, 'notification', row);
+      const summary = await this.messengerSummary(userId);
+      this.realtime.emitToUser(userId, 'messenger_summary', summary);
+    } catch (err) {
+      this.logger.warn(
+        `Realtime notification omitido: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    void this.pushSafe(
+      userId,
+      row.title,
+      row.body ?? undefined,
+      row.type,
+      (row.payload as Prisma.InputJsonValue) ?? undefined,
+    );
   }
 
   /** Push FCM sin guardar ni refrescar el inbox (p. ej. mensajes de chat). */

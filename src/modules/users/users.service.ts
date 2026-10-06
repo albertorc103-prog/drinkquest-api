@@ -1,15 +1,15 @@
-import { BadRequestException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { ChatRoomType, ProfileVisibility, Prisma, User } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
-import { verifyPassword } from '../../common/utils/crypto.util';
 import {
   AchievementProgressEntryDto,
   QuestProgressEntryDto,
   SyncGamificationDto,
   UserGamificationDto,
 } from './dto/user-gamification.dto';
+import { AccountDeletionService } from './account-deletion.service';
 
-const GAMIFICATION_SELECT = {
+export const GAMIFICATION_SELECT = {
   coins: true,
   loginStreakDays: true,
   lastLoginEpochDay: true,
@@ -44,7 +44,10 @@ type AchievementMap = Record<string, AchievementProgressEntryDto>;
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly accountDeletion: AccountDeletionService,
+  ) {}
 
   async getProfile(userId: string, viewerId?: string) {
     const user = await this.prisma.user.findFirst({
@@ -91,6 +94,21 @@ export class UsersService {
     if (!user) throw new NotFoundException('Usuario no encontrado');
 
     const isSelf = targetId === viewerId;
+    if (!isSelf) {
+      const blocked = await this.prisma.userBlock.findFirst({
+        where: {
+          OR: [
+            { initiatorId: viewerId, targetId },
+            { initiatorId: targetId, targetId: viewerId },
+          ],
+        },
+        select: { id: true },
+      });
+      if (blocked) {
+        throw new NotFoundException('Usuario no encontrado');
+      }
+    }
+
     const isFriend = isSelf ? true : await this.areFriends(targetId, viewerId);
     if (user.profileVisibility === ProfileVisibility.PRIVATE && !isSelf && !isFriend) {
       return {
@@ -280,49 +298,16 @@ export class UsersService {
     }
   }
 
-  /** El usuario elimina su propia cuenta: verifica contraseña, borra progreso, soft delete + revocación de sesiones. */
+  /** El usuario elimina su propia cuenta (AccountDeletionService: hard delete + limpieza completa). */
   async deleteOwnAccount(userId: string, password: string): Promise<{ deleted: true }> {
-    const user = await this.prisma.user.findFirst({
-      where: { id: userId, deletedAt: null },
-      select: { id: true, passwordHash: true },
-    });
-    if (!user) throw new NotFoundException('Usuario no encontrado');
-
-    const plain = password?.trim() ?? '';
-    if (!plain || !(await verifyPassword(plain, user.passwordHash))) {
-      throw new UnauthorizedException('Contraseña incorrecta');
-    }
-
-    const now = new Date();
-    await this.prisma.$transaction(async (tx) => {
-      await this.wipeUserProgressData(tx, userId);
-      await tx.refreshToken.updateMany({
-        where: { userId, revokedAt: null },
-        data: { revokedAt: now },
-      });
-      await tx.deviceToken.deleteMany({ where: { userId } });
-      await tx.user.update({
-        where: { id: userId },
-        data: {
-          deletedAt: now,
-          isOnline: false,
-          totalXp: 0,
-          level: 1,
-          coins: 0,
-          loginStreakDays: 0,
-          lastLoginEpochDay: 0,
-          streakBonusTierClaimed: 0,
-          dailyChestClaimedDay: 0,
-          questProgress: Prisma.DbNull,
-          achievementProgress: Prisma.DbNull,
-        },
-      });
-    });
-    return { deleted: true };
+    const result = await this.accountDeletion.deleteOwnAccountWithPassword(userId, password);
+    return { deleted: result.deleted };
   }
 
   /** Borra colección, historial, misiones/medallas, publicaciones y grafo social del usuario. */
   async wipeUserProgressData(tx: Prisma.TransactionClient, userId: string): Promise<void> {
+    await tx.placeVisit.deleteMany({ where: { userId } });
+    await tx.placeReview.deleteMany({ where: { userId } });
     await tx.postLike.deleteMany({ where: { userId } });
     await tx.postCommentLike.deleteMany({ where: { userId } });
     await tx.feedPost.deleteMany({ where: { authorId: userId } });
@@ -358,6 +343,7 @@ export class UsersService {
       });
     }
     await tx.messageRead.deleteMany({ where: { userId } });
+    await tx.messageReaction.deleteMany({ where: { userId } });
     await tx.chatMessage.deleteMany({ where: { senderId: userId } });
     await tx.chatParticipant.deleteMany({ where: { userId } });
     await tx.chatRoom.updateMany({
@@ -412,17 +398,26 @@ export class UsersService {
   }
 
   async search(query: string, excludeUserId: string, limit = 20) {
+    const q = query?.trim() ?? '';
+    if (q.length < 2) return [];
+    const take = Math.min(Math.max(limit, 1), 30);
     return this.prisma.user.findMany({
       where: {
         deletedAt: null,
         id: { not: excludeUserId },
-        OR: [
-          { displayName: { contains: query, mode: 'insensitive' } },
-          { email: { contains: query, mode: 'insensitive' } },
-        ],
+        // Solo displayName — no filtrar/exponer por email (enumeración).
+        displayName: { contains: q, mode: 'insensitive' },
       },
-      take: limit,
+      take,
       select: { id: true, displayName: true, avatarUrl: true, isOnline: true },
+    });
+  }
+
+  /** Snapshot mínimo para handshake Socket.IO (securityVersion). */
+  async findAuthSecurity(userId: string): Promise<{ id: string; securityVersion: number } | null> {
+    return this.prisma.user.findFirst({
+      where: { id: userId, deletedAt: null },
+      select: { id: true, securityVersion: true },
     });
   }
 
@@ -495,40 +490,19 @@ export class UsersService {
     return 0;
   }
 
-  private applyStreakBonus(user: GamificationSlice): {
-    coins: number;
-    streakBonusTierClaimed: number;
-    totalXp: number;
-    level: number;
-  } {
-    const tier = this.streakBonusTier(user.loginStreakDays);
-    if (tier === 0 || tier <= user.streakBonusTierClaimed) {
-      return {
-        coins: user.coins,
-        streakBonusTierClaimed: user.streakBonusTierClaimed,
-        totalXp: user.totalXp,
-        level: user.level,
-      };
-    }
-    const bonusXp = tier === 3 ? 50 : tier === 7 ? 100 : tier === 14 ? 200 : 500;
-    const totalXp = user.totalXp + bonusXp;
-    return {
-      coins: user.coins + tier * 5,
-      streakBonusTierClaimed: tier,
-      totalXp,
-      level: this.levelFromTotalXp(totalXp),
-    };
-  }
-
+  /**
+   * FASE 4.1: sync de progreso offline únicamente.
+   * NO otorga XP: el cliente no es autoridad (ni con caps).
+   * xpReward del payload se ignora; se conserva el valor servidor previo si existía.
+   */
   private mergeQuestProgress(
     stored: QuestMap,
     incoming: QuestMap | undefined,
-  ): { merged: QuestMap; xpGained: number } {
+  ): QuestMap {
     if (!incoming || Object.keys(incoming).length === 0) {
-      return { merged: stored, xpGained: 0 };
+      return stored;
     }
     const merged: QuestMap = { ...stored };
-    let xpGained = 0;
     for (const [key, inc] of Object.entries(incoming)) {
       if (!inc || typeof inc !== 'object') continue;
       const prev = stored[key] ?? {};
@@ -541,106 +515,81 @@ export class UsersService {
           ? Number(inc.periodEpochDay)
           : null;
 
-      // Periodo nuevo (diaria/semanal): el cliente manda el snapshot del periodo actual
-      // (puede ser progress 0 / completedAt null tras reset).
       if (incPeriod != null && (prevPeriod == null || incPeriod > prevPeriod)) {
-        const wasDone = prev.completedAt != null && Number(prev.completedAt) > 0;
         const progress = Math.max(0, Number(inc.progress ?? 0));
         const completedAt =
           inc.completedAt != null && Number(inc.completedAt) > 0
             ? Number(inc.completedAt)
             : null;
-        const incomingXp =
-          inc.xpReward != null && Number.isFinite(Number(inc.xpReward))
-            ? Math.max(0, Number(inc.xpReward))
-            : 0;
-        const xpReward = Math.max(incomingXp, Number(prev.xpReward ?? 0));
         merged[key] = {
           progress,
           completedAt,
           periodEpochDay: incPeriod,
-          xpReward: xpReward > 0 ? xpReward : undefined,
+          // No aceptar XP del cliente; conservar snapshot servidor si había.
+          xpReward:
+            prev.xpReward != null && Number(prev.xpReward) > 0
+              ? Number(prev.xpReward)
+              : undefined,
         };
-        // Migración (sin periodEpochDay previo pero ya completada): sellar periodo sin re-premiar.
-        // Premiar solo con xpReward explícito del cliente (completación real / rollover).
-        if (completedAt != null && incomingXp > 0) {
-          const isPeriodMigration = prevPeriod == null && wasDone;
-          const isRealPeriodRollover = prevPeriod != null && incPeriod > prevPeriod;
-          const isFirstCompletion = !wasDone;
-          if (!isPeriodMigration && (isFirstCompletion || isRealPeriodRollover)) {
-            xpGained += incomingXp;
-          }
-        }
         continue;
       }
 
-      // Incoming de un periodo más viejo: ignorar.
       if (incPeriod != null && prevPeriod != null && incPeriod < prevPeriod) {
         continue;
       }
 
-      const wasDone = prev.completedAt != null && Number(prev.completedAt) > 0;
       const progress = Math.max(Number(prev.progress ?? 0), Number(inc.progress ?? 0));
       const completedAt = this.earliestMillis(prev.completedAt, inc.completedAt);
-      const incomingXp =
-        inc.xpReward != null && Number.isFinite(Number(inc.xpReward))
-          ? Math.max(0, Number(inc.xpReward))
-          : 0;
-      const xpReward = Math.max(Number(prev.xpReward ?? 0), incomingXp);
       merged[key] = {
         progress,
         completedAt: completedAt ?? null,
         periodEpochDay: incPeriod ?? prevPeriod ?? undefined,
-        xpReward: xpReward > 0 ? xpReward : undefined,
+        xpReward:
+          prev.xpReward != null && Number(prev.xpReward) > 0
+            ? Number(prev.xpReward)
+            : undefined,
       };
-      const nowDone = completedAt != null && completedAt > 0;
-      if (!wasDone && nowDone && incomingXp > 0) {
-        xpGained += incomingXp;
-      }
     }
-    return { merged, xpGained };
+    return merged;
   }
 
+  /**
+   * FASE 4.1: sync de medallas offline sin XP cliente.
+   * Unlock sin xpReward cliente: se acepta unlockedAt solo si ya estaba en servidor
+   * o si el logro existe en catálogo backend (premia vía ledger aparte).
+   */
   private mergeAchievementProgress(
     stored: AchievementMap,
     incoming: AchievementMap | undefined,
-  ): { merged: AchievementMap; xpGained: number } {
+  ): AchievementMap {
     if (!incoming || Object.keys(incoming).length === 0) {
-      return { merged: stored, xpGained: 0 };
+      return stored;
     }
     const merged: AchievementMap = { ...stored };
-    let xpGained = 0;
     for (const [key, inc] of Object.entries(incoming)) {
       if (!inc || typeof inc !== 'object') continue;
       const prev = stored[key] ?? {};
       const wasDone = prev.unlockedAt != null && Number(prev.unlockedAt) > 0;
       const progress = Math.max(Number(prev.progress ?? 0), Number(inc.progress ?? 0));
-      const incomingXp =
-        inc.xpReward != null && Number.isFinite(Number(inc.xpReward))
-          ? Math.max(0, Number(inc.xpReward))
-          : 0;
-      const xpReward = Math.max(Number(prev.xpReward ?? 0), incomingXp);
-      // No rehidratar unlocks "fantasma" tras wipe: solo aceptar desbloqueo nuevo si el
-      // cliente manda xpReward (completación real). Push silent (awardXp=false) no revive medallas.
       const claimedUnlock = inc.unlockedAt != null && Number(inc.unlockedAt) > 0;
       let unlockedAt: number | null = wasDone
         ? this.earliestMillis(prev.unlockedAt, inc.unlockedAt)
         : null;
-      if (!wasDone && claimedUnlock && incomingXp > 0) {
+      // Rehidratación de progreso sin otorgar XP; unlock nuevo se marca para UX
+      // pero el XP solo se acredita vía claimCatalogAchievementRewards.
+      if (!wasDone && claimedUnlock) {
         unlockedAt = Number(inc.unlockedAt);
       }
       merged[key] = {
         progress,
         unlockedAt: unlockedAt ?? null,
-        xpReward: xpReward > 0 ? xpReward : undefined,
+        xpReward:
+          prev.xpReward != null && Number(prev.xpReward) > 0
+            ? Number(prev.xpReward)
+            : undefined,
       };
-      const nowDone = unlockedAt != null && unlockedAt > 0;
-      // Solo premiar si el cliente manda xpReward (completación real, no rehidratación).
-      if (!wasDone && nowDone && incomingXp > 0) {
-        xpGained += incomingXp;
-      }
     }
-    return { merged, xpGained };
+    return merged;
   }
 
   private earliestMillis(a: number | null | undefined, b: number | null | undefined): number | null {
@@ -670,22 +619,19 @@ export class UsersService {
       });
     }
 
-    const bonus = this.applyStreakBonus(next);
-    if (
-      bonus.coins !== next.coins ||
-      bonus.streakBonusTierClaimed !== next.streakBonusTierClaimed ||
-      bonus.totalXp !== next.totalXp
-    ) {
-      next = await this.prisma.user.update({
-        where: { id: userId },
-        data: bonus,
-        select: { id: true, ...GAMIFICATION_SELECT },
-      });
-    }
+    next = await this.applyStreakBonusWithLedger(userId, next);
 
     return this.gamificationFromUser(next, await this.loadProgressMaps(userId));
   }
 
+  /**
+   * FASE 4.1 — sync offline de progreso.
+   * Acepta: questProgress / achievementProgress (estado, sin XP cliente).
+   * Acepta: dailyChestClaimedDay (solo día actual servidor → +50 coins ledger).
+   * Ignora: coins, loginStreakDays, lastLoginEpochDay, streakBonusTierClaimed,
+   *         xpReward/level del cliente.
+   * XP/coins de catálogo backend: solo Mission/Achievement por slug + ledger.
+   */
   async syncGamification(userId: string, payload: SyncGamificationDto): Promise<UserGamificationDto> {
     const user = await this.prisma.user.findFirst({
       where: { id: userId, deletedAt: null },
@@ -694,54 +640,28 @@ export class UsersService {
     if (!user) throw new NotFoundException('Usuario no encontrado');
 
     const storedProgress = await this.loadProgressMaps(userId);
-    const questMerge = this.mergeQuestProgress(
-      storedProgress.questProgress,
-      payload.questProgress,
-    );
-    const achievementMerge = this.mergeAchievementProgress(
-      storedProgress.achievementProgress,
-      payload.achievementProgress,
-    );
-    const progressXp = questMerge.xpGained + achievementMerge.xpGained;
-
-    const data: Prisma.UserUpdateInput = {};
-    if (payload.coins != null) {
-      data.coins = Math.max(user.coins, payload.coins);
-    }
-    if (payload.loginStreakDays != null) {
-      data.loginStreakDays = Math.max(user.loginStreakDays, payload.loginStreakDays);
-    }
-    if (payload.lastLoginEpochDay != null) {
-      data.lastLoginEpochDay = Math.max(user.lastLoginEpochDay, payload.lastLoginEpochDay);
-    }
-    if (payload.streakBonusTierClaimed != null) {
-      data.streakBonusTierClaimed = Math.max(
-        user.streakBonusTierClaimed,
-        payload.streakBonusTierClaimed,
-      );
-    }
-    if (payload.dailyChestClaimedDay != null) {
-      data.dailyChestClaimedDay = Math.max(
-        user.dailyChestClaimedDay,
-        payload.dailyChestClaimedDay,
-      );
-    }
-
     const hasQuestPayload = payload.questProgress != null;
     const hasAchievementPayload = payload.achievementProgress != null;
+    const questMerged = hasQuestPayload
+      ? this.mergeQuestProgress(storedProgress.questProgress, payload.questProgress)
+      : storedProgress.questProgress;
+    const achievementMerged = hasAchievementPayload
+      ? this.mergeAchievementProgress(
+          storedProgress.achievementProgress,
+          payload.achievementProgress,
+        )
+      : storedProgress.achievementProgress;
+
+    const data: Prisma.UserUpdateInput = {};
+    // coins / streak / level: NO aceptados desde cliente (autoridad servidor).
     if (hasQuestPayload) {
-      data.questProgress = questMerge.merged as Prisma.InputJsonValue;
+      data.questProgress = questMerged as Prisma.InputJsonValue;
     }
     if (hasAchievementPayload) {
-      data.achievementProgress = achievementMerge.merged as Prisma.InputJsonValue;
-    }
-    if (progressXp > 0) {
-      const totalXp = user.totalXp + progressXp;
-      data.totalXp = totalXp;
-      data.level = this.levelFromTotalXp(totalXp);
+      data.achievementProgress = achievementMerged as Prisma.InputJsonValue;
     }
 
-    const updated =
+    let next: { id: string } & GamificationSlice =
       Object.keys(data).length === 0
         ? user
         : await this.prisma.user.update({
@@ -750,11 +670,181 @@ export class UsersService {
             select: { id: true, ...GAMIFICATION_SELECT },
           });
 
-    return this.gamificationFromUser(updated, {
-      questProgress: hasQuestPayload ? questMerge.merged : storedProgress.questProgress,
-      achievementProgress: hasAchievementPayload
-        ? achievementMerge.merged
-        : storedProgress.achievementProgress,
+    // Cofre diario: máximo +50 coins/día UTC, idempotente por ledger.
+    const claimedDay =
+      payload.dailyChestClaimedDay != null && Number.isFinite(Number(payload.dailyChestClaimedDay))
+        ? Math.max(0, Math.floor(Number(payload.dailyChestClaimedDay)))
+        : null;
+    const today = this.epochDay();
+    if (claimedDay != null && claimedDay === today && claimedDay > next.dailyChestClaimedDay) {
+      next = await this.grantRewardOnce(userId, next, {
+        sourceType: 'DAILY_CHEST',
+        sourceId: String(claimedDay),
+        xp: 0,
+        coins: 50,
+        userPatch: { dailyChestClaimedDay: claimedDay },
+      });
+    }
+
+    // Logros/misiones del catálogo backend (slug): XP servidor + ledger.
+    next = await this.claimCatalogProgressRewards(userId, next, questMerged, achievementMerged);
+
+    return this.gamificationFromUser(next, {
+      questProgress: questMerged,
+      achievementProgress: achievementMerged,
+    });
+  }
+
+  private async applyStreakBonusWithLedger(
+    userId: string,
+    user: { id: string } & GamificationSlice,
+  ): Promise<{ id: string } & GamificationSlice> {
+    const tier = this.streakBonusTier(user.loginStreakDays);
+    if (tier === 0 || tier <= user.streakBonusTierClaimed) return user;
+    const bonusXp = tier === 3 ? 50 : tier === 7 ? 100 : tier === 14 ? 200 : 500;
+    return this.grantRewardOnce(userId, user, {
+      sourceType: 'STREAK_TIER',
+      sourceId: String(tier),
+      xp: bonusXp,
+      coins: tier * 5,
+      userPatch: { streakBonusTierClaimed: tier },
+    });
+  }
+
+  /**
+   * Premia solo keys que existen en Mission/Achievement (slug) con xpReward servidor.
+   * Idempotente: UNIQUE(userId, sourceType, sourceId).
+   */
+  private async claimCatalogProgressRewards(
+    userId: string,
+    user: { id: string } & GamificationSlice,
+    questProgress: QuestMap,
+    achievementProgress: AchievementMap,
+  ): Promise<{ id: string } & GamificationSlice> {
+    let next = user;
+    const questKeys = Object.entries(questProgress)
+      .filter(([, v]) => v?.completedAt != null && Number(v.completedAt) > 0)
+      .map(([k]) => k);
+    const achievementKeys = Object.entries(achievementProgress)
+      .filter(([, v]) => v?.unlockedAt != null && Number(v.unlockedAt) > 0)
+      .map(([k]) => k);
+
+    if (questKeys.length) {
+      const missions = await this.prisma.mission.findMany({
+        where: { slug: { in: questKeys }, deletedAt: null, isActive: true },
+        select: { slug: true, xpReward: true },
+      });
+      for (const m of missions) {
+        const entry = questProgress[m.slug];
+        const period =
+          entry?.periodEpochDay != null && Number.isFinite(Number(entry.periodEpochDay))
+            ? String(Math.floor(Number(entry.periodEpochDay)))
+            : 'once';
+        next = await this.grantRewardOnce(userId, next, {
+          sourceType: 'QUEST',
+          sourceId: `${m.slug}:${period}`,
+          xp: Math.max(0, m.xpReward),
+          coins: 0,
+        });
+      }
+    }
+
+    if (achievementKeys.length) {
+      const achievements = await this.prisma.achievement.findMany({
+        where: { slug: { in: achievementKeys }, deletedAt: null },
+        select: { slug: true, xpReward: true },
+      });
+      for (const a of achievements) {
+        next = await this.grantRewardOnce(userId, next, {
+          sourceType: 'ACHIEVEMENT',
+          sourceId: a.slug,
+          xp: Math.max(0, a.xpReward),
+          coins: 0,
+        });
+      }
+    }
+
+    return next;
+  }
+
+  /**
+   * Ledger idempotente UNIQUE(userId, sourceType, sourceId).
+   * Si `tx` se pasa, NO abre $transaction anidada (FASE 6 medal unlock).
+   * Sin `tx`, mantiene el comportamiento histórico con TX propia + soft P2002.
+   */
+  async grantRewardOnce(
+    userId: string,
+    user: { id: string } & GamificationSlice,
+    grant: {
+      sourceType: string;
+      sourceId: string;
+      xp: number;
+      coins: number;
+      userPatch?: Prisma.UserUpdateInput;
+    },
+    tx?: Prisma.TransactionClient,
+  ): Promise<{ id: string } & GamificationSlice> {
+    const xp = Math.max(0, grant.xp);
+    const coins = Math.max(0, grant.coins);
+    if (xp === 0 && coins === 0 && !grant.userPatch) return user;
+
+    if (tx) {
+      return this.applyGrantInTx(tx, userId, user, { ...grant, xp, coins });
+    }
+
+    try {
+      return await this.prisma.$transaction(async (inner) =>
+        this.applyGrantInTx(inner, userId, user, { ...grant, xp, coins }),
+      );
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        // Replay: ya premiado.
+        return (
+          (await this.prisma.user.findFirst({
+            where: { id: userId },
+            select: { id: true, ...GAMIFICATION_SELECT },
+          })) ?? user
+        );
+      }
+      throw err;
+    }
+  }
+
+  private async applyGrantInTx(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    user: { id: string } & GamificationSlice,
+    grant: {
+      sourceType: string;
+      sourceId: string;
+      xp: number;
+      coins: number;
+      userPatch?: Prisma.UserUpdateInput;
+    },
+  ): Promise<{ id: string } & GamificationSlice> {
+    await tx.gamificationReward.create({
+      data: {
+        userId,
+        sourceType: grant.sourceType,
+        sourceId: grant.sourceId,
+        xp: grant.xp,
+        coins: grant.coins,
+      },
+    });
+    const totalXp = user.totalXp + grant.xp;
+    return tx.user.update({
+      where: { id: userId },
+      data: {
+        ...(grant.userPatch ?? {}),
+        ...(grant.xp > 0
+          ? { totalXp, level: this.levelFromTotalXp(totalXp) }
+          : {}),
+        ...(grant.coins > 0 ? { coins: { increment: grant.coins } } : {}),
+      },
+      select: { id: true, ...GAMIFICATION_SELECT },
     });
   }
 }

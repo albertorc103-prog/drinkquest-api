@@ -38,7 +38,7 @@ describe('shapeAnalyticsForPlan', () => {
     expect(shaped.returningUsers).toBe(0);
   });
 
-  it('Intermedio: tendencias y horas pico, top 3, sin audiencia', () => {
+  it('Mixologist: tendencias y horas pico, top 3, sin audiencia', () => {
     const shaped = shapeAnalyticsForPlan(sample, SubscriptionPlan.INTERMEDIATE);
     expect(shaped.planTier).toBe('trends');
     expect(shaped.weeklyActivity).toEqual(sample.weeklyActivity);

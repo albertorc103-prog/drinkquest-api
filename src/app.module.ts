@@ -13,6 +13,7 @@ import { ChatModule } from './modules/chat/chat.module';
 import { DrinksModule } from './modules/drinks/drinks.module';
 import { FeedModule } from './modules/feed/feed.module';
 import { FriendsModule } from './modules/friends/friends.module';
+import { ReportsModule } from './modules/reports/reports.module';
 import { MissionsModule } from './modules/missions/missions.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { PromotionsModule } from './modules/promotions/promotions.module';
@@ -57,6 +58,7 @@ import { SocketsModule } from './sockets/sockets.module';
     AuthModule,
     UsersModule,
     FriendsModule,
+    ReportsModule,
     ChatModule,
     DrinksModule,
     QrModule,

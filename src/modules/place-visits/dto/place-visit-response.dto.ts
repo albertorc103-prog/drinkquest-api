@@ -7,8 +7,11 @@ export type PlaceCheckInStatus =
   | 'TOO_SOON'
   | 'OUT_OF_RANGE'
   | 'INACCURATE'
+  | 'LOCATION_INVALID'
+  | 'LOCATION_STALE'
   | 'PLACE_NOT_FOUND'
   | 'PLACE_COORDS_UNAVAILABLE'
+  | 'FORBIDDEN'
   | 'BAD_REQUEST';
 
 export class PlaceCheckInResponseDto {

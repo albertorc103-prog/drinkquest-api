@@ -76,8 +76,40 @@ async function main() {
     data: { deletedAt: new Date() },
   });
 
+  // Soft-delete set antiguo: nombres que no están en las 100 oficiales.
+  const canonicalNames = new Set(DEMO_DRINKS.map((d) => d.name.trim().toLowerCase()));
+  const staleNamed = await prisma.drink.findMany({
+    where: { deletedAt: null, sourceSpecialDrinkId: null },
+    select: { id: true, name: true },
+  });
+  const staleNamedIds = staleNamed
+    .filter((row) => !canonicalNames.has(row.name.trim().toLowerCase()))
+    .map((row) => row.id);
+  const removedByName =
+    staleNamedIds.length === 0
+      ? { count: 0 }
+      : await prisma.drink.updateMany({
+          where: { id: { in: staleNamedIds } },
+          data: { deletedAt: new Date() },
+        });
+
+  // Quitar del menú de bares cualquier bebida fuera del catálogo oficial.
+  const staleMenu = await prisma.barMenuItem.updateMany({
+    where: {
+      deletedAt: null,
+      OR: [
+        { drink: { deletedAt: { not: null } } },
+        { drink: { sourceSpecialDrinkId: null, legacyId: null } },
+        { drink: { sourceSpecialDrinkId: null, legacyId: { lt: 1 } } },
+        { drink: { sourceSpecialDrinkId: null, legacyId: { gt: 100 } } },
+        ...(staleNamedIds.length > 0 ? [{ drinkId: { in: staleNamedIds } }] : []),
+      ],
+    },
+    data: { deletedAt: new Date(), active: false },
+  });
+
   const legacyMismatch = await prisma.drink.findMany({
-    where: { deletedAt: null, legacyId: { not: null } },
+    where: { deletedAt: null, legacyId: { not: null }, sourceSpecialDrinkId: null },
     select: { legacyId: true, name: true, imageKey: true },
     orderBy: { legacyId: 'asc' },
   });
@@ -90,6 +122,8 @@ async function main() {
 
   console.log(`✅ Catálogo canónico: ${upserted} bebidas actualizadas`);
   console.log(`🗑️  Bebidas fuera de 1–100 archivadas: ${removed.count}`);
+  console.log(`🗑️  Bebidas con nombre fuera del set oficial: ${removedByName.count}`);
+  console.log(`🗑️  Ítems de menú fuera de catálogo archivados: ${staleMenu.count}`);
   if (wrongName.length > 0) {
     console.warn('⚠️  Revisa nombres tras sync:', wrongName);
   } else {
@@ -97,7 +131,11 @@ async function main() {
   }
 
   const active = await prisma.drink.count({
-    where: { deletedAt: null, legacyId: { gte: 1, lte: 100 } },
+    where: {
+      deletedAt: null,
+      sourceSpecialDrinkId: null,
+      legacyId: { gte: 1, lte: 100 },
+    },
   });
   console.log(`📊 Bebidas activas en catálogo: ${active}`);
   if (active !== 100) {

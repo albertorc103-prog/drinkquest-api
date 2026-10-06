@@ -42,9 +42,20 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       const token =
         (client.handshake.auth?.token as string) ||
         (client.handshake.headers.authorization?.replace('Bearer ', '') ?? '');
-      const payload = await this.jwt.verifyAsync(token, {
-        secret: this.config.get<string>('auth.accessSecret'),
+      const payload = await this.jwt.verifyAsync<{ sub?: string; sv?: number }>(token, {
+        secret: this.config.getOrThrow<string>('auth.accessSecret'),
+        algorithms: ['HS256'],
       });
+      if (!payload?.sub || typeof payload.sv !== 'number') {
+        client.disconnect();
+        return;
+      }
+      // Misma regla que JwtStrategy: sv debe coincidir con DB.
+      const user = await this.users.findAuthSecurity(payload.sub);
+      if (!user || user.securityVersion !== payload.sv) {
+        client.disconnect();
+        return;
+      }
       client.data.userId = payload.sub;
       await this.users.setOnline(payload.sub, true);
       await this.redis.client.sadd(`online:${payload.sub}`, client.id);
@@ -90,10 +101,17 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     @ConnectedSocket() client: Socket,
     @MessageBody() body: { roomId: string; typing: boolean },
   ) {
+    const userId = client.data.userId as string;
+    if (!body?.roomId || !userId) return;
+    try {
+      await this.chat.assertParticipant(body.roomId, userId);
+    } catch {
+      throw new ForbiddenException('No perteneces a esta sala');
+    }
     client.to(`room:${body.roomId}`).emit('typing', {
-      userId: client.data.userId,
+      userId,
       roomId: body.roomId,
-      typing: body.typing,
+      typing: !!body.typing,
     });
   }
 

@@ -61,6 +61,7 @@ enum ReportTargetType {
   COMMENT
   BAR
   MESSAGE
+  REVIEW
 }
 
 enum NotificationType {
@@ -238,6 +239,37 @@ enum BarMissionSeasonStatus {
   ENDED
 }
 
+/**
+ * Estados de revisión/activación de una versión de medalla de local (v2).
+ * Independiente del status de la temporada.
+ */
+enum BarMissionMedalVersionStatus {
+  DRAFT
+  PENDING_REVIEW
+  CHANGES_REQUESTED
+  APPROVED
+  ACTIVE
+  REJECTED
+  DISABLED
+}
+
+/// Cómo se combinan las condiciones de una versión de medalla.
+enum BarMissionMedalConditionMode {
+  ALL
+  ANY
+}
+
+/**
+ * Tipos de condición de medalla de local.
+ * EVENT_PARTICIPATION está reservado; no aceptar creación en API hasta haber participación verificable.
+ */
+enum BarMissionMedalConditionType {
+  VISITS
+  DRINKS_UNLOCKED
+  MISSION_COMPLETED
+  EVENT_PARTICIPATION
+}
+
 /// Reserva de mesa (Legend). Solo nombre, personas y fecha — sin depósito.
 enum BarReservationStatus {
   PENDING
@@ -277,71 +309,88 @@ enum ChatRoomType {
 }
 
 model User {
-  id                String            @id @default(uuid()) @db.Uuid
-  email             String            @unique
-  passwordHash      String            @map("password_hash")
-  displayName       String            @map("display_name")
-  bio               String?
-  avatarUrl         String?           @map("avatar_url")
-  role              Role              @default(USER)
-  profileVisibility ProfileVisibility @default(PUBLIC) @map("profile_visibility")
-  emailVerified     Boolean           @default(false) @map("email_verified")
-  emailVerifiedAt   DateTime?         @map("email_verified_at")
-  isOnline          Boolean           @default(false) @map("is_online")
-  lastSeenAt        DateTime?         @map("last_seen_at")
-  totalXp           Int               @default(0) @map("total_xp")
-  level             Int               @default(1)
-  coins             Int               @default(0)
-  loginStreakDays   Int               @default(0) @map("login_streak_days")
-  lastLoginEpochDay Int               @default(0) @map("last_login_epoch_day")
-  streakBonusTierClaimed Int          @default(0) @map("streak_bonus_tier_claimed")
-  dailyChestClaimedDay Int            @default(0) @map("daily_chest_claimed_day")
-  /** Snapshot catálogo local: missionKey → { progress, completedAt?, xpReward? } */
-  questProgress     Json?             @map("quest_progress")
-  /** Snapshot medallas locales: achievementKey → { progress, unlockedAt?, xpReward? } */
-  achievementProgress Json?           @map("achievement_progress")
-  createdAt         DateTime          @default(now()) @map("created_at")
-  updatedAt         DateTime          @updatedAt @map("updated_at")
-  deletedAt         DateTime?         @map("deleted_at")
+  id                     String            @id @default(uuid()) @db.Uuid
+  email                  String            @unique
+  passwordHash           String            @map("password_hash")
+  displayName            String            @map("display_name")
+  bio                    String?
+  avatarUrl              String?           @map("avatar_url")
+  role                   Role              @default(USER)
+  profileVisibility      ProfileVisibility @default(PUBLIC) @map("profile_visibility")
+  emailVerified          Boolean           @default(false) @map("email_verified")
+  emailVerifiedAt        DateTime?         @map("email_verified_at")
+  /**
+   * Momento en que se verificó mayoría de edad (18+) en registro.
+   * null = cuenta legacy previa a FASE 2 (no se inventa DOB).
+   * No se almacena fecha de nacimiento.
+   */
+  ageVerifiedAt          DateTime?         @map("age_verified_at")
+  /**
+   * Versión de seguridad de sesión. Se incrementa en logout-all / cambio o reset de contraseña.
+   * Access JWT incluye claim `sv`; JwtStrategy rechaza si no coincide.
+   */
+  securityVersion        Int               @default(0) @map("security_version")
+  isOnline               Boolean           @default(false) @map("is_online")
+  lastSeenAt             DateTime?         @map("last_seen_at")
+  totalXp                Int               @default(0) @map("total_xp")
+  level                  Int               @default(1)
+  coins                  Int               @default(0)
+  loginStreakDays        Int               @default(0) @map("login_streak_days")
+  lastLoginEpochDay      Int               @default(0) @map("last_login_epoch_day")
+  streakBonusTierClaimed Int               @default(0) @map("streak_bonus_tier_claimed")
+  dailyChestClaimedDay   Int               @default(0) @map("daily_chest_claimed_day")
+  /**
+   * Snapshot catálogo local: missionKey → { progress, completedAt?, xpReward? }
+   */
+  questProgress          Json?             @map("quest_progress")
+  /**
+   * Snapshot medallas locales: achievementKey → { progress, unlockedAt?, xpReward? }
+   */
+  achievementProgress    Json?             @map("achievement_progress")
+  createdAt              DateTime          @default(now()) @map("created_at")
+  updatedAt              DateTime          @updatedAt @map("updated_at")
+  deletedAt              DateTime?         @map("deleted_at")
 
-  refreshTokens       RefreshToken[]
-  emailVerifications  EmailVerification[]
-  passwordResets      PasswordReset[]
-  bar                 Bar?
-  sentFriendRequests  FriendRequest[]     @relation("FriendRequestSender")
-  receivedFriendRequests FriendRequest[]  @relation("FriendRequestReceiver")
-  friendshipsA        Friendship[]          @relation("FriendshipUserA")
-  friendshipsB        Friendship[]          @relation("FriendshipUserB")
-  blocksInitiated     UserBlock[]           @relation("BlockInitiator")
-  blocksReceived      UserBlock[]           @relation("BlockTarget")
-  chatMemberships     ChatParticipant[]
-  messagesSent        ChatMessage[]
-  messageReads        MessageRead[]
-  messageReactions    MessageReaction[]
-  drinkUnlocks        UserDrinkUnlock[]
-  drinkHistory        DrinkHistoryEntry[]
-  favoriteDrinks      UserFavoriteDrink[]
-  promotionActivations UserPromotionActivation[]
-  userMissions        UserMission[]
-  userAchievements    UserAchievement[]
-  userBarMissionProgress UserBarMissionProgress[]
-  userBarMedals       UserBarMedal[]
-  barReservations     BarReservation[]
-  globalEventProgress UserGlobalEventProgress[]
-  globalEventMedals   UserGlobalEventMedal[]
-  posts               FeedPost[]
-  postLikes           PostLike[]
-  postComments        PostComment[]
-  postCommentLikes    PostCommentLike[]
-  notifications       Notification[]
-  deviceTokens        DeviceToken[]
+  refreshTokens           RefreshToken[]
+  emailVerifications      EmailVerification[]
+  passwordResets          PasswordReset[]
+  bar                     Bar?
+  sentFriendRequests      FriendRequest[]              @relation("FriendRequestSender")
+  receivedFriendRequests  FriendRequest[]              @relation("FriendRequestReceiver")
+  friendshipsA            Friendship[]                 @relation("FriendshipUserA")
+  friendshipsB            Friendship[]                 @relation("FriendshipUserB")
+  blocksInitiated         UserBlock[]                  @relation("BlockInitiator")
+  blocksReceived          UserBlock[]                  @relation("BlockTarget")
+  chatMemberships         ChatParticipant[]
+  messagesSent            ChatMessage[]
+  messageReads            MessageRead[]
+  messageReactions        MessageReaction[]
+  drinkUnlocks            UserDrinkUnlock[]
+  drinkHistory            DrinkHistoryEntry[]
+  favoriteDrinks          UserFavoriteDrink[]
+  promotionActivations    UserPromotionActivation[]
+  userMissions            UserMission[]
+  userAchievements        UserAchievement[]
+  userBarMissionProgress  UserBarMissionProgress[]
+  userBarMedals           UserBarMedal[]
+  barReservations         BarReservation[]
+  globalEventProgress     UserGlobalEventProgress[]
+  globalEventMedals       UserGlobalEventMedal[]
+  posts                   FeedPost[]
+  postLikes               PostLike[]
+  postComments            PostComment[]
+  postCommentLikes        PostCommentLike[]
+  notifications           Notification[]
+  deviceTokens            DeviceToken[]
   notificationPreferences UserNotificationPreferences?
-  reportsFiled        Report[]              @relation("ReportReporter")
-  reportsReceived     Report[]              @relation("ReportTargetUser")
-  qrSessionsScanned   QrSession[]           @relation("QrScannedBy")
-  createdChatRooms    ChatRoom[]            @relation("ChatRoomCreator")
-  placeVisits         PlaceVisit[]
-  placeReviews        PlaceReview[]
+  reportsFiled            Report[]                     @relation("ReportReporter")
+  reportsReceived         Report[]                     @relation("ReportTargetUser")
+  qrSessionsScanned       QrSession[]                  @relation("QrScannedBy")
+  createdChatRooms        ChatRoom[]                   @relation("ChatRoomCreator")
+  placeVisits             PlaceVisit[]
+  placeReviews            PlaceReview[]
+  gamificationRewards     GamificationReward[]
+  uploadAssets            UploadAsset[]
 
   @@index([email])
   @@index([role])
@@ -349,28 +398,67 @@ model User {
   @@map("users")
 }
 
+/// Ledger mínimo de recompensas (idempotencia XP/coins).
+model GamificationReward {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  sourceType String   @map("source_type")
+  sourceId   String   @map("source_id")
+  xp         Int      @default(0)
+  coins      Int      @default(0)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, sourceType, sourceId])
+  @@index([userId, createdAt])
+  @@map("gamification_rewards")
+}
+
+/// Metadata de uploads para ownership (MinIO/R2).
+model UploadAsset {
+  id          String   @id @default(uuid()) @db.Uuid
+  ownerUserId String   @map("owner_user_id") @db.Uuid
+  folder      String
+  objectKey   String   @unique @map("object_key")
+  publicUrl   String   @map("public_url")
+  mimeType    String   @map("mime_type")
+  sizeBytes   Int      @map("size_bytes")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  owner User @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+
+  @@index([ownerUserId, createdAt])
+  @@map("upload_assets")
+}
+
 model RefreshToken {
-  id        String   @id @default(uuid()) @db.Uuid
-  userId    String   @map("user_id") @db.Uuid
-  tokenHash String   @map("token_hash")
-  expiresAt DateTime @map("expires_at")
-  revokedAt DateTime? @map("revoked_at")
-  createdAt DateTime @default(now()) @map("created_at")
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  /// Familia de rotación: reuse de un token revocado invalida toda la familia.
+  familyId     String    @map("family_id") @db.Uuid
+  tokenHash    String    @map("token_hash")
+  expiresAt    DateTime  @map("expires_at")
+  revokedAt    DateTime? @map("revoked_at")
+  /// Sucesor emitido al rotar; ayuda a distinguir race concurrente vs reuse sospechoso.
+  replacedById String?   @map("replaced_by_id") @db.Uuid
+  createdAt    DateTime  @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([tokenHash])
+  @@index([familyId])
   @@map("refresh_tokens")
 }
 
 model EmailVerification {
-  id        String   @id @default(uuid()) @db.Uuid
-  userId    String   @map("user_id") @db.Uuid
-  tokenHash String   @map("token_hash")
-  expiresAt DateTime @map("expires_at")
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
   usedAt    DateTime? @map("used_at")
-  createdAt DateTime @default(now()) @map("created_at")
+  createdAt DateTime  @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -379,12 +467,12 @@ model EmailVerification {
 }
 
 model PasswordReset {
-  id        String   @id @default(uuid()) @db.Uuid
-  userId    String   @map("user_id") @db.Uuid
-  tokenHash String   @map("token_hash")
-  expiresAt DateTime @map("expires_at")
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
   usedAt    DateTime? @map("used_at")
-  createdAt DateTime @default(now()) @map("created_at")
+  createdAt DateTime  @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -393,52 +481,53 @@ model PasswordReset {
 }
 
 model Bar {
-  id           String   @id @default(uuid()) @db.Uuid
-  ownerUserId  String   @unique @map("owner_user_id") @db.Uuid
-  businessName String   @map("business_name")
-  slug         String   @unique
-  description  String?
-  address      String?
-  city         String?
-  country      String?
-  phone        String?
-  logoUrl      String?  @map("logo_url")
-  bannerUrl    String?  @map("banner_url")
-  latitude     Float?
-  longitude    Float?
+  id                       String                    @id @default(uuid()) @db.Uuid
+  /// Nullable tras eliminación de cuenta del owner (establecimiento desactivado, no hard-delete).
+  ownerUserId              String?                   @unique @map("owner_user_id") @db.Uuid
+  businessName             String                    @map("business_name")
+  slug                     String                    @unique
+  description              String?
+  address                  String?
+  city                     String?
+  country                  String?
+  phone                    String?
+  logoUrl                  String?                   @map("logo_url")
+  bannerUrl                String?                   @map("banner_url")
+  latitude                 Float?
+  longitude                Float?
   /// Identidad Google Places del local (UNIQUE). No crear ExternalPlace si es null.
-  googlePlaceId String? @unique @map("google_place_id")
+  googlePlaceId            String?                   @unique @map("google_place_id")
   /// Radio de check-in en metros; null → CHECK_IN_RADIUS_METERS (50).
-  checkInRadiusMeters Int? @map("check_in_radius_meters")
+  checkInRadiusMeters      Int?                      @map("check_in_radius_meters")
   /// Horario de apertura estructurado: { days: [{ day, closed, open, close }] }
-  openingHours Json?    @map("opening_hours")
-  isVerified   Boolean  @default(false) @map("is_verified")
-  isActive     Boolean  @default(true) @map("is_active")
+  openingHours             Json?                     @map("opening_hours")
+  isVerified               Boolean                   @default(false) @map("is_verified")
+  isActive                 Boolean                   @default(true) @map("is_active")
   /// El bar declara terraza o jardín (Legend).
-  hasOutdoorSpace Boolean @default(false) @map("has_outdoor_space")
-  rooftopStatus RooftopVerificationStatus @default(NONE) @map("rooftop_status")
-  rooftopRejectionReason String? @map("rooftop_rejection_reason")
-  rooftopReviewedAt DateTime? @map("rooftop_reviewed_at")
-  rooftopReviewedByAdminId String? @map("rooftop_reviewed_by_admin_id") @db.Uuid
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
-  deletedAt    DateTime? @map("deleted_at")
+  hasOutdoorSpace          Boolean                   @default(false) @map("has_outdoor_space")
+  rooftopStatus            RooftopVerificationStatus @default(NONE) @map("rooftop_status")
+  rooftopRejectionReason   String?                   @map("rooftop_rejection_reason")
+  rooftopReviewedAt        DateTime?                 @map("rooftop_reviewed_at")
+  rooftopReviewedByAdminId String?                   @map("rooftop_reviewed_by_admin_id") @db.Uuid
+  createdAt                DateTime                  @default(now()) @map("created_at")
+  updatedAt                DateTime                  @updatedAt @map("updated_at")
+  deletedAt                DateTime?                 @map("deleted_at")
 
-  owner         User               @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
-  menuItems     BarMenuItem[]
-  qrSessions    QrSession[]
-  subscription  BarSubscription?
-  promotions    BarPromotion[]
-  specialDrinks   BarSpecialDrink[]
-  missionSeasons  BarMissionSeason[]
-  userBarMedals   UserBarMedal[]
-  rooftopPackages BarRooftopPackage[]
-  venueEvents     BarVenueEvent[]
-  reservations    BarReservation[]
-  globalEventBars GlobalEventBar[]
+  owner              User?               @relation(fields: [ownerUserId], references: [id], onDelete: SetNull)
+  menuItems          BarMenuItem[]
+  qrSessions         QrSession[]
+  subscription       BarSubscription?
+  promotions         BarPromotion[]
+  specialDrinks      BarSpecialDrink[]
+  missionSeasons     BarMissionSeason[]
+  userBarMedals      UserBarMedal[]
+  rooftopPackages    BarRooftopPackage[]
+  venueEvents        BarVenueEvent[]
+  reservations       BarReservation[]
+  globalEventBars    GlobalEventBar[]
   magazineEditorials MagazineEditorial[]
-  placeVisits     PlaceVisit[]
-  placeReviews    PlaceReview[]
+  placeVisits        PlaceVisit[]
+  placeReviews       PlaceReview[]
 
   @@index([slug])
   @@index([deletedAt])
@@ -468,6 +557,8 @@ model ExternalPlace {
 }
 
 /// Visita válida a un lugar (Bar DrinkQuest y/o ExternalPlace Google).
+/// FASE 3: latitude/longitude/accuracy del usuario ya no se escriben en visitas nuevas
+/// (minimización). Columnas nullable para conservar filas históricas.
 model PlaceVisit {
   id              String               @id @default(uuid()) @db.Uuid
   userId          String               @map("user_id") @db.Uuid
@@ -477,8 +568,9 @@ model PlaceVisit {
   googlePlaceId   String?              @map("google_place_id")
   visitDate       DateTime             @map("visit_date") @db.Date
   visitedAt       DateTime             @map("visited_at")
-  latitude        Float
-  longitude       Float
+  /// Histórico: coords del usuario en visitas antiguas. Nuevas visitas → null.
+  latitude        Float?
+  longitude       Float?
   accuracy        Float?
   distanceMeters  Float                @map("distance_meters")
   xpAwarded       Int                  @map("xp_awarded")
@@ -494,17 +586,20 @@ model PlaceVisit {
   @@index([userId, googlePlaceId, visitedAt])
   @@index([userId, barId, visitedAt])
   @@index([userId, externalPlaceId, visitedAt])
+  @@index([barId, visitedAt])
   @@map("place_visits")
 }
 
 /// Calificación y opinión de un usuario sobre un lugar (Bar y/o Google Place).
-/// Una opinión por usuario e identidad canónica (googlePlaceId o barId).
+/// Una opinión por usuario e identidad canónica (placeKey = googlePlaceId | bar:{barId}).
 model PlaceReview {
   id              String   @id @default(uuid()) @db.Uuid
   userId          String   @map("user_id") @db.Uuid
   barId           String?  @map("bar_id") @db.Uuid
   externalPlaceId String?  @map("external_place_id") @db.Uuid
   googlePlaceId   String?  @map("google_place_id")
+  /// Clave canónica: googlePlaceId o "bar:{barId}".
+  placeKey        String   @map("place_key")
   rating          Int
   comment         String?
   createdAt       DateTime @default(now()) @map("created_at")
@@ -514,31 +609,33 @@ model PlaceReview {
   bar           Bar?           @relation(fields: [barId], references: [id], onDelete: SetNull)
   externalPlace ExternalPlace? @relation(fields: [externalPlaceId], references: [id], onDelete: SetNull)
 
+  @@unique([userId, placeKey])
   @@index([userId, createdAt])
   @@index([googlePlaceId, createdAt])
   @@index([barId, createdAt])
+  @@index([placeKey, createdAt])
   @@map("place_reviews")
 }
 
 /// Evento publicitario del lugar (Legend). Publicación directa con aceptación de políticas;
 /// el admin puede retirarlo si incumple.
 model BarVenueEvent {
-  id                 String                      @id @default(uuid()) @db.Uuid
-  barId              String                      @map("bar_id") @db.Uuid
+  id                 String                     @id @default(uuid()) @db.Uuid
+  barId              String                     @map("bar_id") @db.Uuid
   title              String
   description        String?
-  imageUrl           String?                     @map("image_url")
-  startsAt           DateTime                    @map("starts_at")
-  endsAt             DateTime                    @map("ends_at")
-  status             VenueEventStatus            @default(DRAFT)
-  moderationStatus   VenueEventModerationStatus  @default(VISIBLE) @map("moderation_status")
-  removalReason      String?                     @map("removal_reason")
-  removedByAdminId   String?                     @map("removed_by_admin_id") @db.Uuid
-  removedAt          DateTime?                   @map("removed_at")
-  policiesAcceptedAt DateTime?                   @map("policies_accepted_at")
-  createdAt          DateTime                    @default(now()) @map("created_at")
-  updatedAt          DateTime                    @updatedAt @map("updated_at")
-  deletedAt          DateTime?                   @map("deleted_at")
+  imageUrl           String?                    @map("image_url")
+  startsAt           DateTime                   @map("starts_at")
+  endsAt             DateTime                   @map("ends_at")
+  status             VenueEventStatus           @default(DRAFT)
+  moderationStatus   VenueEventModerationStatus @default(VISIBLE) @map("moderation_status")
+  removalReason      String?                    @map("removal_reason")
+  removedByAdminId   String?                    @map("removed_by_admin_id") @db.Uuid
+  removedAt          DateTime?                  @map("removed_at")
+  policiesAcceptedAt DateTime?                  @map("policies_accepted_at")
+  createdAt          DateTime                   @default(now()) @map("created_at")
+  updatedAt          DateTime                   @updatedAt @map("updated_at")
+  deletedAt          DateTime?                  @map("deleted_at")
 
   bar Bar @relation(fields: [barId], references: [id], onDelete: Cascade)
 
@@ -552,21 +649,22 @@ model BarVenueEvent {
 
 /// Reserva de mesa en un bar Legend. Sin depósito.
 model BarReservation {
-  id           String              @id @default(uuid()) @db.Uuid
-  barId        String              @map("bar_id") @db.Uuid
-  userId       String              @map("user_id") @db.Uuid
-  guestName    String              @map("guest_name")
-  partySize    Int                 @map("party_size")
-  reservedFor  DateTime            @map("reserved_for")
-  notes        String?
-  status       BarReservationStatus @default(PENDING)
-  barResponse  String?             @map("bar_response")
-  createdAt    DateTime            @default(now()) @map("created_at")
-  updatedAt    DateTime            @updatedAt @map("updated_at")
-  resolvedAt   DateTime?           @map("resolved_at")
+  id          String               @id @default(uuid()) @db.Uuid
+  barId       String               @map("bar_id") @db.Uuid
+  /// Nullable tras eliminación de cuenta (reserva anonimizada para el local).
+  userId      String?              @map("user_id") @db.Uuid
+  guestName   String               @map("guest_name")
+  partySize   Int                  @map("party_size")
+  reservedFor DateTime             @map("reserved_for")
+  notes       String?
+  status      BarReservationStatus @default(PENDING)
+  barResponse String?              @map("bar_response")
+  createdAt   DateTime             @default(now()) @map("created_at")
+  updatedAt   DateTime             @updatedAt @map("updated_at")
+  resolvedAt  DateTime?            @map("resolved_at")
 
-  bar  Bar  @relation(fields: [barId], references: [id], onDelete: Cascade)
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bar  Bar   @relation(fields: [barId], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([barId, status])
   @@index([userId, status])
@@ -576,21 +674,21 @@ model BarReservation {
 
 /// Campaña global DrinkQuest. Solo bares Legend pueden formar el pool.
 model GlobalEvent {
-  id               String             @id @default(uuid()) @db.Uuid
+  id               String              @id @default(uuid()) @db.Uuid
   title            String
   description      String
-  imageUrl         String?            @map("image_url")
+  imageUrl         String?             @map("image_url")
   goalType         GlobalEventGoalType @default(VISIT_BARS) @map("goal_type")
-  targetCount      Int                @default(3) @map("target_count")
-  startsAt         DateTime           @map("starts_at")
-  endsAt           DateTime           @map("ends_at")
-  status           GlobalEventStatus  @default(DRAFT)
-  medalTitle       String             @map("medal_title")
-  medalDescription String             @map("medal_description")
-  createdByAdminId String?            @map("created_by_admin_id") @db.Uuid
-  createdAt        DateTime           @default(now()) @map("created_at")
-  updatedAt        DateTime           @updatedAt @map("updated_at")
-  deletedAt        DateTime?          @map("deleted_at")
+  targetCount      Int                 @default(3) @map("target_count")
+  startsAt         DateTime            @map("starts_at")
+  endsAt           DateTime            @map("ends_at")
+  status           GlobalEventStatus   @default(DRAFT)
+  medalTitle       String              @map("medal_title")
+  medalDescription String              @map("medal_description")
+  createdByAdminId String?             @map("created_by_admin_id") @db.Uuid
+  createdAt        DateTime            @default(now()) @map("created_at")
+  updatedAt        DateTime            @updatedAt @map("updated_at")
+  deletedAt        DateTime?           @map("deleted_at")
 
   bars     GlobalEventBar[]
   progress UserGlobalEventProgress[]
@@ -707,44 +805,57 @@ model BarRooftopPackage {
   @@map("bar_rooftop_packages")
 }
 
-/// Temporada de 3 misiones del local (Legend) → 1 medalla del bar.
+/// Temporada de misiones del local (Legend) → medalla versionada (v2).
+/// `medalTitle` / `medalDescription` se conservan por compatibilidad con clientes actuales.
 model BarMissionSeason {
-  id               String                 @id @default(uuid()) @db.Uuid
-  barId            String                 @map("bar_id") @db.Uuid
-  title            String
-  startsAt         DateTime               @map("starts_at")
-  endsAt           DateTime               @map("ends_at")
-  status           BarMissionSeasonStatus @default(DRAFT)
-  medalTitle       String                 @map("medal_title")
-  medalDescription String                 @map("medal_description")
-  createdAt        DateTime               @default(now()) @map("created_at")
-  updatedAt        DateTime               @updatedAt @map("updated_at")
-  deletedAt        DateTime?              @map("deleted_at")
+  id                    String                 @id @default(uuid()) @db.Uuid
+  barId                 String                 @map("bar_id") @db.Uuid
+  title                 String
+  startsAt              DateTime               @map("starts_at")
+  endsAt                DateTime               @map("ends_at")
+  status                BarMissionSeasonStatus @default(DRAFT)
+  /// @deprecated Preferir versión activa (`currentMedalVersion` / medalVersions). Compat Android/API.
+  medalTitle            String                 @map("medal_title")
+  /// @deprecated Preferir versión activa. Compat Android/API.
+  medalDescription      String                 @map("medal_description")
+  /**
+   * Versión más reciente de configuración/trabajo de la medalla de la temporada.
+   * Puede ser DRAFT / PENDING_REVIEW / APPROVED / ACTIVE / etc.
+   * NO implica desbloqueable: el motor debe buscar status=ACTIVE explícitamente.
+   */
+  currentMedalVersionId String?                @map("current_medal_version_id") @db.Uuid
+  createdAt             DateTime               @default(now()) @map("created_at")
+  updatedAt             DateTime               @updatedAt @map("updated_at")
+  deletedAt             DateTime?              @map("deleted_at")
 
-  bar          Bar              @relation(fields: [barId], references: [id], onDelete: Cascade)
-  missions     BarMission[]
-  medalUnlocks UserBarMedal[]
+  bar                 Bar                      @relation(fields: [barId], references: [id], onDelete: Cascade)
+  missions            BarMission[]
+  medalUnlocks        UserBarMedal[]
+  medalVersions       BarMissionMedalVersion[] @relation("SeasonMedalVersions")
+  currentMedalVersion BarMissionMedalVersion?  @relation("SeasonCurrentMedalVersion", fields: [currentMedalVersionId], references: [id], onDelete: SetNull)
 
   @@index([barId])
   @@index([status])
   @@index([startsAt, endsAt])
   @@index([deletedAt])
+  @@index([currentMedalVersionId])
   @@map("bar_mission_seasons")
 }
 
 model BarMission {
-  id          String            @id @default(uuid()) @db.Uuid
-  seasonId    String            @map("season_id") @db.Uuid
+  id          String             @id @default(uuid()) @db.Uuid
+  seasonId    String             @map("season_id") @db.Uuid
   template    BarMissionTemplate
   title       String
   description String
-  targetCount Int               @default(1) @map("target_count")
-  sortOrder   Int               @default(0) @map("sort_order")
-  createdAt   DateTime          @default(now()) @map("created_at")
-  updatedAt   DateTime          @updatedAt @map("updated_at")
+  targetCount Int                @default(1) @map("target_count")
+  sortOrder   Int                @default(0) @map("sort_order")
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt @map("updated_at")
 
-  season    BarMissionSeason         @relation(fields: [seasonId], references: [id], onDelete: Cascade)
-  progress  UserBarMissionProgress[]
+  season               BarMissionSeason           @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  progress             UserBarMissionProgress[]
+  medalConditionsAsRef BarMissionMedalCondition[]
 
   @@index([seasonId])
   @@map("bar_missions")
@@ -767,50 +878,125 @@ model UserBarMissionProgress {
   @@map("user_bar_mission_progress")
 }
 
-/// Una medalla por temporada del local (Legend).
-model UserBarMedal {
-  id         String   @id @default(uuid()) @db.Uuid
-  userId     String   @map("user_id") @db.Uuid
-  barId      String   @map("bar_id") @db.Uuid
-  seasonId   String   @map("season_id") @db.Uuid
-  unlockedAt DateTime @default(now()) @map("unlocked_at")
-  createdAt  DateTime @default(now()) @map("created_at")
+/**
+ * Versión inmutable (cuando ACTIVE) de la medalla de una temporada.
+ * Review admin obligatorio para versiones nuevas; legacy migrado puede nacer ACTIVE/DISABLED.
+ * Semántica `BarMissionSeason.currentMedalVersionId`:
+ * apunta a la versión más reciente de configuración/trabajo de la temporada
+ * (puede ser DRAFT / PENDING_REVIEW / APPROVED / ACTIVE / …).
+ * NO implica desbloqueable: el motor debe buscar status=ACTIVE explícitamente.
+ */
+model BarMissionMedalVersion {
+  id                 String                       @id @default(uuid()) @db.Uuid
+  seasonId           String                       @map("season_id") @db.Uuid
+  version            Int                          @default(1)
+  title              String
+  description        String
+  status             BarMissionMedalVersionStatus @default(DRAFT)
+  conditionMode      BarMissionMedalConditionMode @default(ALL) @map("condition_mode")
+  /// Solo ADMIN/DrinkQuest; el bar no lo define. Preparado para FASE 6.
+  xpReward           Int                          @default(0) @map("xp_reward")
+  templateId         String?                      @map("template_id")
+  designConfig       Json?                        @map("design_config")
+  /// Comentario admin (request-changes / reject). Alias API: reviewComment.
+  reviewNote         String?                      @map("review_note")
+  moderatedByAdminId String?                      @map("moderated_by_admin_id") @db.Uuid
+  moderatedAt        DateTime?                    @map("moderated_at")
+  submittedByUserId  String?                      @map("submitted_by_user_id") @db.Uuid
+  submittedAt        DateTime?                    @map("submitted_at")
+  approvedAt         DateTime?                    @map("approved_at")
+  activatedAt        DateTime?                    @map("activated_at")
+  disabledAt         DateTime?                    @map("disabled_at")
+  createdAt          DateTime                     @default(now()) @map("created_at")
+  updatedAt          DateTime                     @updatedAt @map("updated_at")
 
-  user   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  bar    Bar              @relation(fields: [barId], references: [id], onDelete: Cascade)
-  season BarMissionSeason @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  season            BarMissionSeason           @relation("SeasonMedalVersions", fields: [seasonId], references: [id], onDelete: Cascade)
+  conditions        BarMissionMedalCondition[]
+  unlocks           UserBarMedal[]
+  currentForSeasons BarMissionSeason[]         @relation("SeasonCurrentMedalVersion")
+
+  @@unique([seasonId, version])
+  @@index([seasonId])
+  @@index([status])
+  @@index([submittedAt])
+  /// UNIQUE parcial PostgreSQL: una sola ACTIVE por season
+  /// → migration 20261006140000_fase4_one_active_medal_per_season
+  @@map("bar_mission_medal_versions")
+}
+
+model BarMissionMedalCondition {
+  id             String                       @id @default(uuid()) @db.Uuid
+  medalVersionId String                       @map("medal_version_id") @db.Uuid
+  type           BarMissionMedalConditionType
+  /// Meta numérica (VISITS, DRINKS_UNLOCKED). Null en condiciones booleanas puras.
+  targetValue    Int?                         @map("target_value")
+  /**
+   * Referencia tipada: para MISSION_COMPLETED = BarMission.id.
+   * FK opcional cuando apunta a misión; EVENT_PARTICIPATION futuro puede usar metadata.
+   */
+  referenceId    String?                      @map("reference_id") @db.Uuid
+  metadata       Json?
+  position       Int                          @default(0)
+  createdAt      DateTime                     @default(now()) @map("created_at")
+
+  medalVersion     BarMissionMedalVersion @relation(fields: [medalVersionId], references: [id], onDelete: Cascade)
+  referenceMission BarMission?            @relation(fields: [referenceId], references: [id], onDelete: SetNull)
+
+  @@index([medalVersionId])
+  @@index([type])
+  @@index([referenceId])
+  @@map("bar_mission_medal_conditions")
+}
+
+/// Una medalla por temporada del local. Conserva la versión exacta obtenida.
+model UserBarMedal {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  barId          String   @map("bar_id") @db.Uuid
+  seasonId       String   @map("season_id") @db.Uuid
+  /// Versión concreta desbloqueada (null solo si legacy pre-backfill; tras migración debe estar poblado).
+  medalVersionId String?  @map("medal_version_id") @db.Uuid
+  unlockedAt     DateTime @default(now()) @map("unlocked_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  user         User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bar          Bar                     @relation(fields: [barId], references: [id], onDelete: Cascade)
+  season       BarMissionSeason        @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  medalVersion BarMissionMedalVersion? @relation(fields: [medalVersionId], references: [id], onDelete: Restrict)
 
   @@unique([userId, seasonId])
   @@index([userId])
   @@index([barId])
+  @@index([medalVersionId])
+  @@index([seasonId, unlockedAt])
   @@map("user_bar_medals")
 }
 
 /// Promoción publicada por un local (visible en feed USER si acceso SaaS válido).
 model BarPromotion {
-  id             String                   @id @default(uuid()) @db.Uuid
-  barId          String                   @map("bar_id") @db.Uuid
-  title          String
-  description    String?
-  imageUrl       String?                  @map("image_url")
-  startsAt       DateTime                 @map("starts_at")
-  endsAt         DateTime                 @map("ends_at")
-  status         PromotionStatus          @default(DRAFT)
-  priority       Int                      @default(0)
-  placementType  PromotionPlacementType   @default(STANDARD) @map("placement_type")
-  eventTheme     PromotionEventTheme      @default(STANDARD) @map("event_theme")
-  approvalStatus PromotionApprovalStatus  @default(PENDING_REVIEW) @map("approval_status")
-  rejectionReason String?                 @map("rejection_reason")
-  moderatedByAdminId String?              @map("moderated_by_admin_id") @db.Uuid
-  moderatedAt    DateTime?                @map("moderated_at")
-  rankingScore   Float                    @default(0) @map("ranking_score")
-  createdAt      DateTime                 @default(now()) @map("created_at")
-  updatedAt      DateTime                 @updatedAt @map("updated_at")
+  id                 String                  @id @default(uuid()) @db.Uuid
+  barId              String                  @map("bar_id") @db.Uuid
+  title              String
+  description        String?
+  imageUrl           String?                 @map("image_url")
+  startsAt           DateTime                @map("starts_at")
+  endsAt             DateTime                @map("ends_at")
+  status             PromotionStatus         @default(DRAFT)
+  priority           Int                     @default(0)
+  placementType      PromotionPlacementType  @default(STANDARD) @map("placement_type")
+  eventTheme         PromotionEventTheme     @default(STANDARD) @map("event_theme")
+  approvalStatus     PromotionApprovalStatus @default(PENDING_REVIEW) @map("approval_status")
+  rejectionReason    String?                 @map("rejection_reason")
+  moderatedByAdminId String?                 @map("moderated_by_admin_id") @db.Uuid
+  moderatedAt        DateTime?               @map("moderated_at")
+  rankingScore       Float                   @default(0) @map("ranking_score")
+  createdAt          DateTime                @default(now()) @map("created_at")
+  updatedAt          DateTime                @updatedAt @map("updated_at")
 
-  bar Bar @relation(fields: [barId], references: [id], onDelete: Cascade)
-  events BarPromotionEvent[]
+  bar             Bar                       @relation(fields: [barId], references: [id], onDelete: Cascade)
+  events          BarPromotionEvent[]
   analyticsEvents PromotionAnalyticsEvent[]
-  activations UserPromotionActivation[]
+  activations     UserPromotionActivation[]
 
   @@index([barId])
   @@index([status])
@@ -825,14 +1011,14 @@ model BarPromotion {
 }
 
 model BarPromotionEvent {
-  id          String            @id @default(uuid()) @db.Uuid
-  promotionId String            @map("promotion_id") @db.Uuid
-  barId       String            @map("bar_id") @db.Uuid
+  id          String             @id @default(uuid()) @db.Uuid
+  promotionId String             @map("promotion_id") @db.Uuid
+  barId       String             @map("bar_id") @db.Uuid
   eventType   PromotionEventType @map("event_type")
-  actorUserId String?           @map("actor_user_id") @db.Uuid
+  actorUserId String?            @map("actor_user_id") @db.Uuid
   reason      String?
-  payload     Json?             @db.JsonB
-  createdAt   DateTime          @default(now()) @map("created_at")
+  payload     Json?              @db.JsonB
+  createdAt   DateTime           @default(now()) @map("created_at")
 
   promotion BarPromotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
 
@@ -842,12 +1028,12 @@ model BarPromotionEvent {
 }
 
 model PromotionAnalyticsEvent {
-  id          String                    @id @default(uuid()) @db.Uuid
-  promotionId String                    @map("promotion_id") @db.Uuid
-  userId      String?                   @map("user_id") @db.Uuid
+  id          String                      @id @default(uuid()) @db.Uuid
+  promotionId String                      @map("promotion_id") @db.Uuid
+  userId      String?                     @map("user_id") @db.Uuid
   eventType   PromotionAnalyticsEventType @map("event_type")
-  metadata    Json?                     @db.JsonB
-  createdAt   DateTime                  @default(now()) @map("created_at")
+  metadata    Json?                       @db.JsonB
+  createdAt   DateTime                    @default(now()) @map("created_at")
 
   promotion BarPromotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
 
@@ -929,12 +1115,12 @@ model BarSubscriptionEvent {
 }
 
 model DrinkCategory {
-  id        String   @id @default(uuid()) @db.Uuid
-  slug      String   @unique
+  id        String    @id @default(uuid()) @db.Uuid
+  slug      String    @unique
   name      String
-  sortOrder Int      @default(0) @map("sort_order")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  sortOrder Int       @default(0) @map("sort_order")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
 
   drinks Drink[]
@@ -968,14 +1154,14 @@ model Drink {
   updatedAt            DateTime    @updatedAt @map("updated_at")
   deletedAt            DateTime?   @map("deleted_at")
 
-  category             DrinkCategory     @relation(fields: [categoryId], references: [id])
-  sourceSpecialDrink   BarSpecialDrink?  @relation(fields: [sourceSpecialDrinkId], references: [id], onDelete: SetNull)
-  barMenuItems         BarMenuItem[]
-  qrSessions           QrSession[]
-  unlocks              UserDrinkUnlock[]
-  history              DrinkHistoryEntry[]
-  favorites            UserFavoriteDrink[]
-  magazineEditorials   MagazineEditorial[]
+  category           DrinkCategory       @relation(fields: [categoryId], references: [id])
+  sourceSpecialDrink BarSpecialDrink?    @relation(fields: [sourceSpecialDrinkId], references: [id], onDelete: SetNull)
+  barMenuItems       BarMenuItem[]
+  qrSessions         QrSession[]
+  unlocks            UserDrinkUnlock[]
+  history            DrinkHistoryEntry[]
+  favorites          UserFavoriteDrink[]
+  magazineEditorials MagazineEditorial[]
 
   @@index([categoryId])
   @@index([rarity])
@@ -985,14 +1171,14 @@ model Drink {
 }
 
 model BarMenuItem {
-  id        String   @id @default(uuid()) @db.Uuid
-  barId     String   @map("bar_id") @db.Uuid
-  drinkId   String   @map("drink_id") @db.Uuid
-  active    Boolean  @default(true)
-  featured  Boolean  @default(false)
-  sortOrder Int      @default(0) @map("sort_order")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id        String    @id @default(uuid()) @db.Uuid
+  barId     String    @map("bar_id") @db.Uuid
+  drinkId   String    @map("drink_id") @db.Uuid
+  active    Boolean   @default(true)
+  featured  Boolean   @default(false)
+  sortOrder Int       @default(0) @map("sort_order")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
 
   bar   Bar   @relation(fields: [barId], references: [id], onDelete: Cascade)
@@ -1017,7 +1203,7 @@ model QrSession {
 
   bar       Bar   @relation(fields: [barId], references: [id], onDelete: Cascade)
   drink     Drink @relation(fields: [drinkId], references: [id], onDelete: Cascade)
-  scannedBy User? @relation("QrScannedBy", fields: [scannedById], references: [id])
+  scannedBy User? @relation("QrScannedBy", fields: [scannedById], references: [id], onDelete: SetNull)
 
   @@index([barId, status])
   @@index([expiresAt])
@@ -1073,16 +1259,16 @@ model UserFavoriteDrink {
 }
 
 model Mission {
-  id          String   @id @default(uuid()) @db.Uuid
-  slug        String   @unique
+  id          String    @id @default(uuid()) @db.Uuid
+  slug        String    @unique
   title       String
   description String
-  triggerKey  String   @map("trigger_key")
-  targetCount Int      @default(1) @map("target_count")
-  xpReward    Int      @default(50) @map("xp_reward")
-  isActive    Boolean  @default(true) @map("is_active")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  triggerKey  String    @map("trigger_key")
+  targetCount Int       @default(1) @map("target_count")
+  xpReward    Int       @default(50) @map("xp_reward")
+  isActive    Boolean   @default(true) @map("is_active")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
   deletedAt   DateTime? @map("deleted_at")
 
   userMissions UserMission[]
@@ -1109,15 +1295,15 @@ model UserMission {
 }
 
 model Achievement {
-  id          String   @id @default(uuid()) @db.Uuid
-  slug        String   @unique
+  id          String    @id @default(uuid()) @db.Uuid
+  slug        String    @unique
   title       String
   description String
-  iconKey     String?  @map("icon_key")
-  xpReward    Int      @default(100) @map("xp_reward")
-  triggerKey  String   @map("trigger_key")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  iconKey     String?   @map("icon_key")
+  xpReward    Int       @default(100) @map("xp_reward")
+  triggerKey  String    @map("trigger_key")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
   deletedAt   DateTime? @map("deleted_at")
 
   userAchievements UserAchievement[]
@@ -1207,7 +1393,9 @@ model ChatParticipant {
   userId     String    @map("user_id") @db.Uuid
   joinedAt   DateTime  @default(now()) @map("joined_at")
   lastReadAt DateTime? @map("last_read_at")
-  /** Si está set, la conversación no aparece en la lista del usuario. */
+  /**
+   * Si está set, la conversación no aparece en la lista del usuario.
+   */
   hiddenAt   DateTime? @map("hidden_at")
   createdAt  DateTime  @default(now()) @map("created_at")
 
@@ -1219,18 +1407,18 @@ model ChatParticipant {
 }
 
 model ChatMessage {
-  id               String    @id @default(uuid()) @db.Uuid
-  roomId           String    @map("room_id") @db.Uuid
-  senderId         String    @map("sender_id") @db.Uuid
-  body             String?
-  imageUrl         String?   @map("image_url")
-  imageKey         String?   @map("image_key")
-  audioUrl         String?   @map("audio_url")
-  audioDurationMs  Int?      @map("audio_duration_ms")
-  replyToId        String?   @map("reply_to_id") @db.Uuid
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
-  deletedAt        DateTime? @map("deleted_at")
+  id              String    @id @default(uuid()) @db.Uuid
+  roomId          String    @map("room_id") @db.Uuid
+  senderId        String    @map("sender_id") @db.Uuid
+  body            String?
+  imageUrl        String?   @map("image_url")
+  imageKey        String?   @map("image_key")
+  audioUrl        String?   @map("audio_url")
+  audioDurationMs Int?      @map("audio_duration_ms")
+  replyToId       String?   @map("reply_to_id") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  deletedAt       DateTime? @map("deleted_at")
 
   room      ChatRoom          @relation(fields: [roomId], references: [id], onDelete: Cascade)
   sender    User              @relation(fields: [senderId], references: [id], onDelete: Cascade)
@@ -1285,7 +1473,7 @@ model FeedPost {
   updatedAt  DateTime     @updatedAt @map("updated_at")
   deletedAt  DateTime?    @map("deleted_at")
 
-  author   User           @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  author   User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
   likes    PostLike[]
   comments PostComment[]
 
@@ -1296,23 +1484,23 @@ model FeedPost {
 }
 
 model MagazineEditorial {
-  id           String          @id @default(uuid()) @db.Uuid
-  section      MagazineSection
-  title        String
-  teaser       String
-  category     String          @default("EDITORIAL")
-  imageUrl     String?         @map("image_url")
-  statusBadge  String          @default("EN BARRA") @map("status_badge")
-  etaLabel     String          @default("ESTA SEMANA") @map("eta_label")
-  barId        String?         @map("bar_id") @db.Uuid
-  drinkId      String?         @map("drink_id") @db.Uuid
-  venueNote    String?         @map("venue_note")
-  sortOrder    Int             @default(0) @map("sort_order")
-  published    Boolean         @default(true)
-  publishedAt  DateTime?       @map("published_at")
-  createdAt    DateTime        @default(now()) @map("created_at")
-  updatedAt    DateTime        @updatedAt @map("updated_at")
-  deletedAt    DateTime?       @map("deleted_at")
+  id          String          @id @default(uuid()) @db.Uuid
+  section     MagazineSection
+  title       String
+  teaser      String
+  category    String          @default("EDITORIAL")
+  imageUrl    String?         @map("image_url")
+  statusBadge String          @default("EN BARRA") @map("status_badge")
+  etaLabel    String          @default("ESTA SEMANA") @map("eta_label")
+  barId       String?         @map("bar_id") @db.Uuid
+  drinkId     String?         @map("drink_id") @db.Uuid
+  venueNote   String?         @map("venue_note")
+  sortOrder   Int             @default(0) @map("sort_order")
+  published   Boolean         @default(true)
+  publishedAt DateTime?       @map("published_at")
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+  deletedAt   DateTime?       @map("deleted_at")
 
   bar   Bar?   @relation(fields: [barId], references: [id], onDelete: SetNull)
   drink Drink? @relation(fields: [drinkId], references: [id], onDelete: SetNull)
@@ -1336,13 +1524,13 @@ model PostLike {
 }
 
 model PostComment {
-  id        String   @id @default(uuid()) @db.Uuid
-  postId    String   @map("post_id") @db.Uuid
-  authorId  String   @map("author_id") @db.Uuid
-  parentId  String?  @map("parent_id") @db.Uuid
+  id        String    @id @default(uuid()) @db.Uuid
+  postId    String    @map("post_id") @db.Uuid
+  authorId  String    @map("author_id") @db.Uuid
+  parentId  String?   @map("parent_id") @db.Uuid
   body      String
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
 
   post    FeedPost          @relation(fields: [postId], references: [id], onDelete: Cascade)
@@ -1370,21 +1558,26 @@ model PostCommentLike {
 }
 
 model Report {
-  id           String           @id @default(uuid()) @db.Uuid
-  reporterId   String           @map("reporter_id") @db.Uuid
-  targetType   ReportTargetType @map("target_type")
-  targetUserId String?          @map("target_user_id") @db.Uuid
-  targetPostId String?          @map("target_post_id") @db.Uuid
-  reason       String
-  status       ReportStatus     @default(OPEN)
-  adminNotes   String?          @map("admin_notes")
-  createdAt    DateTime         @default(now()) @map("created_at")
-  updatedAt    DateTime         @updatedAt @map("updated_at")
+  id              String           @id @default(uuid()) @db.Uuid
+  /// Nullable tras eliminación de cuenta (evidencia de moderación conservada).
+  reporterId      String?          @map("reporter_id") @db.Uuid
+  targetType      ReportTargetType @map("target_type")
+  targetUserId    String?          @map("target_user_id") @db.Uuid
+  targetPostId    String?          @map("target_post_id") @db.Uuid
+  targetReviewId  String?          @map("target_review_id") @db.Uuid
+  targetMessageId String?          @map("target_message_id") @db.Uuid
+  reason          String
+  status          ReportStatus     @default(OPEN)
+  adminNotes      String?          @map("admin_notes")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
 
-  reporter   User  @relation("ReportReporter", fields: [reporterId], references: [id], onDelete: Cascade)
-  targetUser User? @relation("ReportTargetUser", fields: [targetUserId], references: [id])
+  reporter   User? @relation("ReportReporter", fields: [reporterId], references: [id], onDelete: SetNull)
+  targetUser User? @relation("ReportTargetUser", fields: [targetUserId], references: [id], onDelete: SetNull)
 
   @@index([status])
+  @@index([reporterId, targetType, targetReviewId])
+  @@index([reporterId, targetType, targetMessageId])
   @@map("reports")
 }
 
@@ -1395,6 +1588,8 @@ model Notification {
   title     String
   body      String?
   payload   Json?
+  /// Idempotencia opcional (p. ej. bar-medal:{userBarMedalId}). NULL = sin dedupe.
+  dedupeKey String?          @unique @map("dedupe_key")
   readAt    DateTime?        @map("read_at")
   createdAt DateTime         @default(now()) @map("created_at")
 
@@ -1418,7 +1613,9 @@ model DeviceToken {
   @@map("device_tokens")
 }
 
-/** Preferencias de push FCM por usuario (defaults: todo activo). */
+/**
+ * Preferencias de push FCM por usuario (defaults: todo activo).
+ */
 model UserNotificationPreferences {
   userId              String   @id @map("user_id") @db.Uuid
   pushEnabled         Boolean  @default(true) @map("push_enabled")

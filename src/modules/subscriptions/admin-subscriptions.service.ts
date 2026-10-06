@@ -278,7 +278,7 @@ export class AdminSubscriptionsService {
     bar: {
       id: string;
       businessName: string;
-      ownerUserId: string;
+      ownerUserId: string | null;
       isActive: boolean;
       deletedAt: Date | null;
     },

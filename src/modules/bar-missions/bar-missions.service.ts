@@ -2,16 +2,15 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import {
   BarMissionSeasonStatus,
   BarMissionTemplate,
-  NotificationType,
   SubscriptionPlan,
 } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
-import { NotificationsService } from '../notifications/notifications.service';
 import { BarAccessService } from '../subscriptions/bar-access.service';
 import {
   barMissionsEnabledForPlan,
@@ -21,6 +20,8 @@ import {
   assertHealthyMissionCopy,
   resolveTemplate,
 } from './bar-mission-templates';
+import { BarMissionMedalActivityService } from './bar-mission-medal-activity.service';
+import { BarMissionMedalProgressService } from './bar-mission-medal-progress.service';
 import {
   CreateBarMissionSeasonDto,
   UpdateBarMissionSeasonDto,
@@ -28,10 +29,13 @@ import {
 
 @Injectable()
 export class BarMissionsService {
+  private readonly logger = new Logger(BarMissionsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly barAccess: BarAccessService,
-    private readonly notifications: NotificationsService,
+    private readonly medalProgress: BarMissionMedalProgressService,
+    private readonly medalActivity: BarMissionMedalActivityService,
   ) {}
 
   async listTemplates() {
@@ -50,7 +54,9 @@ export class BarMissionsService {
 
   async createSeason(ownerUserId: string, dto: CreateBarMissionSeasonDto) {
     const { bar } = await this.assertOwnerLegend(ownerUserId);
-    this.validateSeasonCopy(dto.title, dto.medalTitle, dto.medalDescription);
+    const medalTitle = dto.medalTitle?.trim() ?? '';
+    const medalDescription = dto.medalDescription?.trim() ?? '';
+    this.validateSeasonCopy(dto.title, medalTitle, medalDescription);
     const startsAt = new Date(dto.startsAt);
     const endsAt = new Date(dto.endsAt);
     if (!(startsAt < endsAt)) {
@@ -79,8 +85,8 @@ export class BarMissionsService {
           status: dto.activate
             ? BarMissionSeasonStatus.ACTIVE
             : BarMissionSeasonStatus.DRAFT,
-          medalTitle: dto.medalTitle.trim(),
-          medalDescription: dto.medalDescription.trim(),
+          medalTitle,
+          medalDescription,
           missions: {
             create: missionDefs.map((m, index) => ({
               template: m.template,
@@ -285,6 +291,66 @@ export class BarMissionsService {
     };
   }
 
+  /**
+   * Progreso de medalla de temporada para el usuario autenticado (read-only).
+   * No expone review/admin metadata. Permite historial si ya tiene UserBarMedal.
+   */
+  async getSeasonMedalProgressForUser(userId: string, seasonId: string) {
+    const season = await this.prisma.barMissionSeason.findFirst({
+      where: { id: seasonId, deletedAt: null },
+      select: {
+        id: true,
+        status: true,
+        startsAt: true,
+        endsAt: true,
+        bar: { select: { id: true, deletedAt: true, isActive: true } },
+      },
+    });
+    if (!season || season.bar.deletedAt || !season.bar.isActive) {
+      throw new NotFoundException('Temporada no encontrada.');
+    }
+
+    const earned = await this.prisma.userBarMedal.findUnique({
+      where: { userId_seasonId: { userId, seasonId } },
+      select: { id: true },
+    });
+
+    const now = new Date();
+    const seasonVisible =
+      season.status === BarMissionSeasonStatus.ACTIVE &&
+      season.startsAt <= now &&
+      season.endsAt >= now;
+
+    if (!earned && !seasonVisible) {
+      throw new NotFoundException('Temporada no disponible.');
+    }
+
+    const progress = await this.medalProgress.getSeasonMedalProgress(userId, seasonId);
+    // Respuesta pública: sin campos admin.
+    return {
+      seasonId: progress.seasonId,
+      status: progress.status,
+      medalVersionId: progress.medalVersionId,
+      earnedMedalVersionId: progress.earnedMedalVersionId,
+      unlocked: progress.unlocked,
+      unlockedAt: progress.unlockedAt,
+      eligibleToUnlock: progress.eligibleToUnlock,
+      conditionMode: progress.conditionMode,
+      overallProgress: progress.overallProgress,
+      title: progress.title,
+      description: progress.description,
+      conditions: progress.conditions.map((c) => ({
+        id: c.id,
+        type: c.type,
+        current: c.current,
+        target: c.target,
+        progress: c.progress,
+        completed: c.completed,
+        referenceId: c.referenceId,
+      })),
+    };
+  }
+
   /** Medallas de locales desbloqueadas por el usuario (historial, aunque la temporada haya terminado). */
   async listMedalsForUser(userId: string) {
     const medals = await this.prisma.userBarMedal.findMany({
@@ -332,136 +398,129 @@ export class BarMissionsService {
     };
   }
 
-  /** Tras canje QR: actualiza progreso de misiones SCAN_* activas del bar. */
-  async onQrUnlock(userId: string, barId: string) {
-    const now = new Date();
-    const season = await this.prisma.barMissionSeason.findFirst({
-      where: {
-        barId,
-        deletedAt: null,
-        status: BarMissionSeasonStatus.ACTIVE,
-        startsAt: { lte: now },
-        endsAt: { gte: now },
-      },
-      include: { missions: true },
-    });
-    if (!season || season.missions.length === 0) return;
-
-    const unlocks = await this.prisma.userDrinkUnlock.findMany({
-      where: {
-        userId,
-        barId,
-        unlockedAt: { gte: season.startsAt, lte: season.endsAt },
-      },
-      select: { drinkId: true, unlockedAt: true },
-      orderBy: { unlockedAt: 'asc' },
-    });
-
-    for (const mission of season.missions) {
-      if (mission.template === BarMissionTemplate.RESERVE_PARTY_OF_TWO) continue;
-      const value = this.computeScanProgress(mission.template, unlocks);
-      const completed = value >= mission.targetCount;
-      await this.prisma.userBarMissionProgress.upsert({
+  /** Tras canje QR (post-commit): actualiza SCAN_* y reevalúa medalla una sola vez. */
+  async onQrUnlock(userId: string, barId: string, occurredAt: Date = new Date()) {
+    try {
+      const season = await this.prisma.barMissionSeason.findFirst({
         where: {
-          userId_missionId: { userId, missionId: mission.id },
+          barId,
+          deletedAt: null,
+          status: BarMissionSeasonStatus.ACTIVE,
+          startsAt: { lte: occurredAt },
+          endsAt: { gte: occurredAt },
         },
-        create: {
-          userId,
-          missionId: mission.id,
-          progress: Math.min(value, mission.targetCount),
-          completedAt: completed ? now : null,
-        },
-        update: {
-          progress: Math.min(value, mission.targetCount),
-          completedAt: completed ? now : null,
-        },
+        include: { missions: true },
       });
-    }
+      if (!season) return;
 
-    await this.maybeUnlockMedal(userId, season.id, barId, season.missions.length);
+      const scanMissions = season.missions.filter(
+        (m) => m.template !== BarMissionTemplate.RESERVE_PARTY_OF_TWO,
+      );
+      if (scanMissions.length > 0) {
+        const unlocks = await this.prisma.userDrinkUnlock.findMany({
+          where: {
+            userId,
+            barId,
+            unlockedAt: { gte: season.startsAt, lte: season.endsAt },
+          },
+          select: { drinkId: true, unlockedAt: true },
+          orderBy: { unlockedAt: 'asc' },
+        });
+
+        for (const mission of scanMissions) {
+          const value = this.computeScanProgress(mission.template, unlocks);
+          const completed = value >= mission.targetCount;
+          await this.prisma.userBarMissionProgress.upsert({
+            where: {
+              userId_missionId: { userId, missionId: mission.id },
+            },
+            create: {
+              userId,
+              missionId: mission.id,
+              progress: Math.min(value, mission.targetCount),
+              completedAt: completed ? occurredAt : null,
+            },
+            update: {
+              progress: Math.min(value, mission.targetCount),
+              // Solo setear completedAt la primera vez (no pisar con null).
+              ...(completed
+                ? { completedAt: occurredAt }
+                : {}),
+            },
+          });
+        }
+      }
+
+      // Una sola reevaluación (DRINKS-only sin misiones SCAN también).
+      await this.medalActivity.evaluateAndMaybeUnlock(userId, season.id, barId);
+    } catch (err) {
+      this.logger.error(
+        JSON.stringify({
+          event: 'bar_medal_trigger_failed',
+          eventType: 'QR',
+          userId,
+          barId,
+          message: err instanceof Error ? err.message : 'unknown',
+        }),
+      );
+    }
   }
 
-  /** Tras confirmar reserva: progreso de misiones RESERVE_PARTY_OF_TWO. */
+  /** Tras confirmar reserva: progreso RESERVE_PARTY_OF_TWO → reevaluación medalla. */
   async onReservationConfirmed(userId: string, barId: string, partySize: number) {
     if (partySize < 2) return;
     const now = new Date();
-    const season = await this.prisma.barMissionSeason.findFirst({
-      where: {
-        barId,
-        deletedAt: null,
-        status: BarMissionSeasonStatus.ACTIVE,
-        startsAt: { lte: now },
-        endsAt: { gte: now },
-      },
-      include: {
-        missions: {
-          where: { template: BarMissionTemplate.RESERVE_PARTY_OF_TWO },
-        },
-      },
-    });
-    if (!season || season.missions.length === 0) return;
-
-    for (const mission of season.missions) {
-      await this.prisma.userBarMissionProgress.upsert({
+    try {
+      const season = await this.prisma.barMissionSeason.findFirst({
         where: {
-          userId_missionId: { userId, missionId: mission.id },
+          barId,
+          deletedAt: null,
+          status: BarMissionSeasonStatus.ACTIVE,
+          startsAt: { lte: now },
+          endsAt: { gte: now },
         },
-        create: {
-          userId,
-          missionId: mission.id,
-          progress: mission.targetCount,
-          completedAt: now,
-        },
-        update: {
-          progress: mission.targetCount,
-          completedAt: now,
+        include: {
+          missions: {
+            where: { template: BarMissionTemplate.RESERVE_PARTY_OF_TWO },
+          },
         },
       });
+      if (!season || season.missions.length === 0) return;
+
+      for (const mission of season.missions) {
+        const existing = await this.prisma.userBarMissionProgress.findUnique({
+          where: { userId_missionId: { userId, missionId: mission.id } },
+        });
+        if (existing?.completedAt) continue;
+        await this.prisma.userBarMissionProgress.upsert({
+          where: {
+            userId_missionId: { userId, missionId: mission.id },
+          },
+          create: {
+            userId,
+            missionId: mission.id,
+            progress: mission.targetCount,
+            completedAt: now,
+          },
+          update: {
+            progress: mission.targetCount,
+            completedAt: now,
+          },
+        });
+      }
+
+      await this.medalActivity.evaluateAndMaybeUnlock(userId, season.id, barId);
+    } catch (err) {
+      this.logger.error(
+        JSON.stringify({
+          event: 'bar_medal_trigger_failed',
+          eventType: 'RESERVATION',
+          userId,
+          barId,
+          message: err instanceof Error ? err.message : 'unknown',
+        }),
+      );
     }
-
-    const allMissions = await this.prisma.barMission.count({
-      where: { seasonId: season.id },
-    });
-    await this.maybeUnlockMedal(userId, season.id, barId, allMissions);
-  }
-
-  private async maybeUnlockMedal(
-    userId: string,
-    seasonId: string,
-    barId: string,
-    totalMissions: number,
-  ) {
-    const completed = await this.prisma.userBarMissionProgress.count({
-      where: {
-        userId,
-        completedAt: { not: null },
-        mission: { seasonId },
-      },
-    });
-    if (completed < totalMissions) return;
-
-    const existing = await this.prisma.userBarMedal.findUnique({
-      where: { userId_seasonId: { userId, seasonId } },
-    });
-    if (existing) return;
-
-    const season = await this.prisma.barMissionSeason.findUnique({
-      where: { id: seasonId },
-      include: { bar: { select: { businessName: true } } },
-    });
-    if (!season) return;
-
-    await this.prisma.userBarMedal.create({
-      data: { userId, barId, seasonId },
-    });
-
-    await this.notifications.create(
-      userId,
-      NotificationType.SYSTEM,
-      `Medalla de ${season.bar.businessName}`,
-      `Desbloqueaste «${season.medalTitle}» completando las 3 misiones del local.`,
-      { barId, seasonId, category: 'bar_medal' },
-    );
   }
 
   private computeScanProgress(
@@ -506,8 +565,18 @@ export class BarMissionsService {
   ) {
     try {
       assertHealthyMissionCopy(title, 'El título de la temporada');
-      assertHealthyMissionCopy(medalTitle, 'El título de la medalla');
-      assertHealthyMissionCopy(medalDescription, 'La descripción de la medalla');
+      const mt = medalTitle.trim();
+      const md = medalDescription.trim();
+      // Temporada v2: medalla se configura después → campos legacy vacíos OK.
+      if (!mt && !md) return;
+      if (mt && mt.length < 3) {
+        throw new Error('El título de la medalla debe tener al menos 3 caracteres.');
+      }
+      if (md && md.length < 10) {
+        throw new Error('La descripción de la medalla debe tener al menos 10 caracteres.');
+      }
+      if (mt) assertHealthyMissionCopy(mt, 'El título de la medalla');
+      if (md) assertHealthyMissionCopy(md, 'La descripción de la medalla');
     } catch (e) {
       throw new BadRequestException(
         e instanceof Error ? e.message : 'Texto no permitido por políticas.',

@@ -74,6 +74,9 @@ export class ChatService {
     if (userId === friendId) {
       throw new ForbiddenException('No puedes chatear contigo mismo');
     }
+    if (await this.friends.areBlocked(userId, friendId)) {
+      throw new ForbiddenException('No puedes chatear con este usuario');
+    }
     if (!(await this.friends.areFriends(userId, friendId))) {
       throw new ForbiddenException('Solo puedes chatear con amigos');
     }
@@ -139,6 +142,9 @@ export class ChatService {
       throw new BadRequestException(`Máximo ${GROUP_MAX_MEMBERS} miembros en el grupo`);
     }
     for (const memberId of withoutSelf) {
+      if (await this.friends.areBlocked(creatorId, memberId)) {
+        throw new ForbiddenException('No puedes agregar a un usuario bloqueado');
+      }
       if (!(await this.friends.areFriends(creatorId, memberId))) {
         throw new ForbiddenException('Solo puedes agregar amigos al grupo');
       }
@@ -198,11 +204,18 @@ export class ChatService {
         where: { roomId, userId: { not: senderId } },
         select: { userId: true },
       });
-      if (!peer || !(await this.friends.areFriends(senderId, peer.userId))) {
+      if (!peer) throw new ForbiddenException('Sala no válida');
+      if (await this.friends.areBlocked(senderId, peer.userId)) {
+        throw new ForbiddenException('No puedes chatear con este usuario');
+      }
+      if (!(await this.friends.areFriends(senderId, peer.userId))) {
         throw new ForbiddenException('Solo puedes chatear con amigos');
       }
     }
     const trimmedBody = body?.trim() || null;
+    if (trimmedBody && trimmedBody.length > 4_000) {
+      throw new BadRequestException('Mensaje demasiado largo');
+    }
     const trimmedImage = imageUrl?.trim() || null;
     const trimmedAudio = audioUrl?.trim() || null;
     let duration: number | null = null;
@@ -471,14 +484,27 @@ export class ChatService {
   }
 
   async markRead(messageId: string, userId: string, roomId?: string) {
+    const message = await this.prisma.chatMessage.findFirst({
+      where: { id: messageId, deletedAt: null },
+      select: { id: true, roomId: true },
+    });
+    if (!message) throw new ForbiddenException('Mensaje no encontrado');
+    await this.assertParticipant(message.roomId, userId);
+    // Ignorar roomId del cliente: autoridad = mensaje.roomId
+    const effectiveRoomId = message.roomId;
+    if (roomId && roomId !== effectiveRoomId) {
+      throw new ForbiddenException('Sala no válida para este mensaje');
+    }
     const read = await this.prisma.messageRead.upsert({
       where: { messageId_userId: { messageId, userId } },
       create: { messageId, userId },
       update: { readAt: new Date() },
     });
-    if (roomId) {
-      this.realtime.emitToRoom(roomId, 'read', { messageId, userId, roomId });
-    }
+    this.realtime.emitToRoom(effectiveRoomId, 'read', {
+      messageId,
+      userId,
+      roomId: effectiveRoomId,
+    });
     return read;
   }
 

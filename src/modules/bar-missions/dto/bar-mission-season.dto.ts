@@ -36,17 +36,24 @@ export class CreateBarMissionSeasonDto {
   @IsDateString()
   endsAt!: string;
 
-  @ApiProperty({ example: 'Medalla Casa Azul' })
+  @ApiPropertyOptional({
+    example: 'Medalla Casa Azul',
+    description:
+      'Legacy opcional. Preferir medalla v2 vía POST …/medal. Vacío = sin medalla legacy.',
+  })
+  @IsOptional()
   @IsString()
-  @MinLength(3)
   @MaxLength(60)
-  medalTitle!: string;
+  medalTitle?: string;
 
-  @ApiProperty({ example: 'Completaste la temporada de misiones del local.' })
+  @ApiPropertyOptional({
+    example: 'Completaste la temporada de misiones del local.',
+    description: 'Legacy opcional. Vacío si la medalla se configura después (v2).',
+  })
+  @IsOptional()
   @IsString()
-  @MinLength(10)
   @MaxLength(240)
-  medalDescription!: string;
+  medalDescription?: string;
 
   @ApiProperty({
     type: [CreateBarMissionItemDto],

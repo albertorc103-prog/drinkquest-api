@@ -1,4 +1,7 @@
 import { DrinkRarity, SubscriptionPlan } from '@prisma/client';
+import { BarFeature, planHasFeature } from './bar-feature.util';
+
+export { BarFeature, planHasFeature, featuresForPlan } from './bar-feature.util';
 
 /** Cupos de bebidas especializadas por rareza (0 = no permitido). */
 export type SpecialDrinkRarityQuotas = Record<DrinkRarity, number>;
@@ -8,6 +11,7 @@ export const SUBSCRIPTION_PLAN_INPUTS = [
   'EXPLORER',
   'INTERMEDIATE',
   'INTERMEDIO',
+  'MIXOLOGIST',
   'MEDIUM',
   'LEGEND',
   'LEGENDARY',
@@ -23,6 +27,7 @@ export function normalizeSubscriptionPlan(
   switch (String(plan ?? SubscriptionPlan.EXPLORER).toUpperCase()) {
     case 'INTERMEDIATE':
     case 'INTERMEDIO':
+    case 'MIXOLOGIST':
     case 'MEDIUM':
     case 'PRO':
       return SubscriptionPlan.INTERMEDIATE;
@@ -90,7 +95,7 @@ export function qrDrinkLimitForPlan(plan: SubscriptionPlan): number | null {
   return isExplorerPlan(plan) ? explorerQrDrinkLimit() : null;
 }
 
-/** Bebidas especializadas del local: Intermedio y Legend. */
+/** Bebidas especializadas del local: Mixologist y Legend. */
 export function specialDrinksEnabledForPlan(plan: SubscriptionPlan): boolean {
   const normalized = normalizeSubscriptionPlan(plan);
   return (
@@ -101,7 +106,7 @@ export function specialDrinksEnabledForPlan(plan: SubscriptionPlan): boolean {
 
 /**
  * Cupos por rareza:
- * - Intermedio: 3 comunes (resto 0)
+ * - Mixologist: 3 comunes (resto 0)
  * - Legend: 5 comunes, 3 raras, 2 épicas, 1 legendaria
  */
 export function specialDrinkQuotasForPlan(
@@ -148,9 +153,14 @@ export function specialDrinkXpForRarity(rarity: DrinkRarity): number {
   }
 }
 
-/** Temporada de misiones + medalla del local: solo Legend. */
+/** Temporada de misiones del local: feature BAR_MISSIONS (mapa de entitlements). */
 export function barMissionsEnabledForPlan(plan: SubscriptionPlan): boolean {
-  return normalizeSubscriptionPlan(plan) === SubscriptionPlan.LEGEND;
+  return planHasFeature(normalizeSubscriptionPlan(plan), BarFeature.BAR_MISSIONS);
+}
+
+/** Medalla de local configurable (v2): feature BAR_CUSTOM_MEDAL. */
+export function barCustomMedalEnabledForPlan(plan: SubscriptionPlan): boolean {
+  return planHasFeature(normalizeSubscriptionPlan(plan), BarFeature.BAR_CUSTOM_MEDAL);
 }
 
 /** Eventos temáticos Happy Hour (Navidad, aniversario, etc.): solo Legend. */
@@ -188,6 +198,16 @@ export function strongMagazinePromoLimit(): number {
   return 5;
 }
 
+/** Publicar experiencias ParaDate en magazine: solo Legend. */
+export function paraDateMagazinePromoEnabledForPlan(plan: SubscriptionPlan): boolean {
+  return normalizeSubscriptionPlan(plan) === SubscriptionPlan.LEGEND;
+}
+
+/** Tope de piezas publicadas en ParaDate por local Legend. */
+export function paraDateMagazinePromoLimit(): number {
+  return 5;
+}
+
 /** Prioridad base añadida al ranking de promos Legend. */
 export function legendPromoPriorityBoost(): number {
   return 50;
@@ -199,21 +219,21 @@ export function featuredMapBoostForPlan(plan: SubscriptionPlan): boolean {
 }
 
 /**
- * Tendencias 7 días + top bebidas: Intermedio y Legend.
+ * Tendencias 7 días + top bebidas: Mixologist y Legend.
  * Explorer solo recibe KPIs del día.
  */
 export function analyticsTrendsEnabledForPlan(plan: SubscriptionPlan): boolean {
   return normalizeSubscriptionPlan(plan) !== SubscriptionPlan.EXPLORER;
 }
 
-/** Horas pico: Intermedio y Legend. */
+/** Horas pico: Mixologist y Legend. */
 export function analyticsPeakHoursEnabledForPlan(plan: SubscriptionPlan): boolean {
   return normalizeSubscriptionPlan(plan) !== SubscriptionPlan.EXPLORER;
 }
 
 /**
  * Audiencia (nuevos/recurrentes), engagement y ranking completo: solo Legend.
- * Intermedio recibe top 3 bebidas; Legend top 8.
+ * Mixologist recibe top 3 bebidas; Legend top 8.
  */
 export function advancedAnalyticsEnabledForPlan(plan: SubscriptionPlan): boolean {
   return normalizeSubscriptionPlan(plan) === SubscriptionPlan.LEGEND;

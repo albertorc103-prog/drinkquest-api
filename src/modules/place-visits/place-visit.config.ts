@@ -12,6 +12,8 @@
 export const PLACE_VISIT_CONFIG = {
   CHECK_IN_RADIUS_METERS: 50,
   MAX_CHECK_IN_ACCURACY_METERS: 50,
+  /** Edad máxima del fix GPS aceptado para check-in (servidor vs capturedAtMs). */
+  MAX_LOCATION_AGE_MS: 5 * 60 * 1000,
   MIN_CHECK_IN_INTERVAL_HOURS: 4,
   SUBSCRIBED_FIRST_VISIT_XP: 25,
   SUBSCRIBED_RETURN_VISIT_XP: 5,

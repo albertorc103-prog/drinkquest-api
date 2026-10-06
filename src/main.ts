@@ -4,7 +4,7 @@ import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import * as compression from 'compression';
 import { randomUUID } from 'crypto';
-import { NextFunction, Request, Response } from 'express';
+import { json, NextFunction, Request, Response, urlencoded } from 'express';
 import helmet from 'helmet';
 import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
 import { AppModule } from './app.module';
@@ -12,10 +12,20 @@ import { ConfigurableIoAdapter } from './common/adapters/configurable-io.adapter
 import { buildCorsOptions } from './common/utils/cors.util';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true, rawBody: true });
+  const app = await NestFactory.create(AppModule, {
+    bufferLogs: true,
+    rawBody: true,
+    bodyParser: false,
+  });
   const config = app.get(ConfigService);
   const logger = app.get(WINSTON_MODULE_NEST_PROVIDER);
   app.useLogger(logger);
+
+  // Límite JSON general (uploads usan multipart con límites propios).
+  app.use(json({ limit: '1mb', verify: (req, _res, buf) => {
+    (req as Request & { rawBody?: Buffer }).rawBody = buf;
+  } }));
+  app.use(urlencoded({ extended: true, limit: '1mb' }));
 
   const nodeEnv = config.get<string>('app.nodeEnv', 'development');
   const prefix = config.get<string>('app.prefix', 'api/v1');
@@ -87,29 +97,35 @@ async function bootstrap() {
     }),
   );
 
-  const swagger = new DocumentBuilder()
-    .setTitle('DrinkQuest API')
-    .setDescription('Enterprise REST + WebSocket API for DrinkQuest')
-    .setVersion('1.0')
-    .addBearerAuth()
-    .addTag('auth')
-    .addTag('users')
-    .addTag('friends')
-    .addTag('chat')
-    .addTag('drinks')
-    .addTag('qr')
-    .addTag('missions')
-    .addTag('feed')
-    .addTag('bars')
-    .addTag('admin')
-    .addTag('notifications')
-    .addTag('uploads')
-    .build();
-  SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, swagger));
+  const swaggerEnabled =
+    nodeEnv !== 'production' || process.env.SWAGGER_ENABLED === 'true';
+  if (swaggerEnabled) {
+    const swagger = new DocumentBuilder()
+      .setTitle('DrinkQuest API')
+      .setDescription('Enterprise REST + WebSocket API for DrinkQuest')
+      .setVersion('1.0')
+      .addBearerAuth()
+      .addTag('auth')
+      .addTag('users')
+      .addTag('friends')
+      .addTag('chat')
+      .addTag('drinks')
+      .addTag('qr')
+      .addTag('missions')
+      .addTag('feed')
+      .addTag('bars')
+      .addTag('admin')
+      .addTag('notifications')
+      .addTag('uploads')
+      .build();
+    SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, swagger));
+  }
 
   await app.listen(port, host);
   logger.log(
-    `DrinkQuest API listening on ${host}:${port} (${nodeEnv}) — Swagger /docs — APP_URL=${publicUrl} API_BASE_URL=${apiBaseUrl}`,
+    `DrinkQuest API listening on ${host}:${port} (${nodeEnv}) — Swagger ${
+      swaggerEnabled ? '/docs' : 'disabled'
+    } — APP_URL=${publicUrl} API_BASE_URL=${apiBaseUrl}`,
   );
 }
 

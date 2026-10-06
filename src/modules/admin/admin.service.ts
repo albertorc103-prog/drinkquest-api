@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma, ReportStatus, Role } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { UsersService } from '../users/users.service';
@@ -20,6 +20,8 @@ const barAdminInclude = {
 
 @Injectable()
 export class AdminService {
+  private readonly logger = new Logger(AdminService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly users: UsersService,
@@ -73,8 +75,33 @@ export class AdminService {
     });
   }
 
-  async resolveReport(id: string, status: ReportStatus, adminNotes?: string) {
-    return this.prisma.report.update({ where: { id }, data: { status, adminNotes } });
+  async resolveReport(
+    id: string,
+    status: ReportStatus,
+    adminNotes?: string,
+    adminId?: string,
+  ) {
+    const updated = await this.prisma.report.update({
+      where: { id },
+      data: { status, adminNotes },
+    });
+    this.logger.log(
+      JSON.stringify({
+        event: 'moderation_resolve_report',
+        reportId: id,
+        targetType: updated.targetType,
+        targetId:
+          updated.targetUserId ??
+          updated.targetPostId ??
+          updated.targetReviewId ??
+          updated.targetMessageId ??
+          null,
+        adminIdHash: adminId ? adminId.slice(0, 8) : undefined,
+        action: status,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    return updated;
   }
 
   async setUserRole(userId: string, role: Role) {

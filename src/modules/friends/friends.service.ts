@@ -13,7 +13,13 @@ export class FriendsService {
     private readonly realtime: RealtimeHub,
   ) {}
 
+  /** Bloqueo bidireccional (A↔B). */
+  async areBlocked(a: string, b: string): Promise<boolean> {
+    return this.isBlocked(a, b);
+  }
+
   private async isBlocked(a: string, b: string) {
+    if (!a || !b || a === b) return false;
     const block = await this.prisma.userBlock.findFirst({
       where: {
         OR: [
@@ -349,6 +355,38 @@ export class FriendsService {
     await this.pushSummary(initiatorId);
     await this.pushSummary(targetId);
     return { blocked: true };
+  }
+
+  async unblock(initiatorId: string, targetId: string) {
+    if (initiatorId === targetId) {
+      throw new BadRequestException('No puedes desbloquearte a ti mismo');
+    }
+    const deleted = await this.prisma.userBlock.deleteMany({
+      where: { initiatorId, targetId },
+    });
+    if (deleted.count === 0) {
+      throw new BadRequestException('No tienes bloqueado a este usuario');
+    }
+    return { unblocked: true };
+  }
+
+  async listBlocked(initiatorId: string) {
+    const rows = await this.prisma.userBlock.findMany({
+      where: { initiatorId },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+      include: {
+        target: {
+          select: { id: true, displayName: true, avatarUrl: true },
+        },
+      },
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      targetId: r.targetId,
+      createdAt: r.createdAt.toISOString(),
+      target: r.target,
+    }));
   }
 
   /** Oculta salas 1:1 entre dos usuarios para quien elimina (o ambos si bloquea). */

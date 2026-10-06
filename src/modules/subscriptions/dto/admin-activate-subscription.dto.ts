@@ -7,8 +7,8 @@ import { normalizeSubscriptionPlan } from '../subscription-plan.util';
 
 export class AdminActivateSubscriptionDto extends AdminSubscriptionActionDto {
   @ApiPropertyOptional({
-    enum: ['EXPLORER', 'INTERMEDIATE', 'LEGEND', 'BASIC', 'PRO'],
-    description: 'Plan SaaS: Explorer ($499), Intermedio ($1000), Legend ($1500)',
+    enum: ['EXPLORER', 'INTERMEDIATE', 'INTERMEDIO', 'MIXOLOGIST', 'LEGEND', 'BASIC', 'PRO'],
+    description: 'Plan SaaS: Explorer ($499), Mixologist ($1000), Legend ($1500)',
   })
   @IsOptional()
   @IsString()

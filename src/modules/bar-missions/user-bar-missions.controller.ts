@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -23,6 +23,18 @@ export class UserBarMissionsController {
   })
   active(@CurrentUser() user: JwtPayload) {
     return this.barMissions.listActiveForUser(user.sub);
+  }
+
+  @Get('seasons/:seasonId/medal/progress')
+  @ApiOperation({
+    summary:
+      'Progreso de la medalla ACTIVE (o histórica obtenida) de una temporada — solo usuario autenticado',
+  })
+  medalProgress(
+    @CurrentUser() user: JwtPayload,
+    @Param('seasonId') seasonId: string,
+  ) {
+    return this.barMissions.getSeasonMedalProgressForUser(user.sub, seasonId);
   }
 
   @Get('me/medals')

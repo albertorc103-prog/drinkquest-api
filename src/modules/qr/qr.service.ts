@@ -1,4 +1,10 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   FeedPostType,
@@ -20,6 +26,7 @@ import {
 } from '../subscriptions/subscription-plan.util';
 import { FeedService } from '../feed/feed.service';
 import { levelFromTotalXp } from '../../common/utils/level-from-xp.util';
+import { assertAgeGateForSensitiveAction } from '../../common/utils/age-gate.util';
 
 export interface QrPayloadResponse {
   sessionId: string;
@@ -78,6 +85,16 @@ export class QrService {
     const now = Date.now();
     const expiresAt = new Date(now + ttlMin * 60_000);
     const token = randomToken(24);
+
+    // Un solo QR activo por bebida: regenerar invalida los ACTIVE previos del mismo drink.
+    await this.prisma.qrSession.updateMany({
+      where: {
+        barId: bar.id,
+        drinkId,
+        status: QrSessionStatus.ACTIVE,
+      },
+      data: { status: QrSessionStatus.EXPIRED },
+    });
 
     const session = await this.prisma.qrSession.create({
       data: {
@@ -150,6 +167,14 @@ export class QrService {
       await this.markExpired(payload.sessionId);
       throw new BadRequestException('Código QR expirado');
     }
+
+    const actor = await this.prisma.user.findFirst({
+      where: { id: userId, deletedAt: null },
+      select: { id: true, role: true, ageVerifiedAt: true, createdAt: true },
+    });
+    if (!actor) throw new ForbiddenException('Usuario no autorizado');
+    // Legacy (ageVerifiedAt null) permitido; cuentas nuevas FASE 2 siempre lo tienen.
+    assertAgeGateForSensitiveAction(actor);
 
     const session = await this.prisma.qrSession.findUnique({
       where: { id: payload.sessionId },

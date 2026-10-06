@@ -1,5 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, RooftopVerificationStatus } from '@prisma/client';
+import { isOfficialCatalogDrink } from '../../common/catalog/canonical-catalog.util';
 import { PrismaService } from '../../database/prisma.service';
 import {
   isExplorerPlan,
@@ -13,10 +14,16 @@ export class BarsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async getByOwner(ownerUserId: string) {
-    return this.prisma.bar.findFirst({
+    const bar = await this.prisma.bar.findFirst({
       where: { ownerUserId, deletedAt: null },
       include: { menuItems: { where: { deletedAt: null }, include: { drink: true } } },
     });
+    if (!bar) return null;
+    // No devolver ítems del set antiguo (nombres fuera del catálogo oficial).
+    return {
+      ...bar,
+      menuItems: bar.menuItems.filter((item) => isOfficialCatalogDrink(item.drink)),
+    };
   }
 
   async updateProfile(ownerUserId: string, data: Record<string, unknown>) {

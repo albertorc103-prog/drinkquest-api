@@ -16,6 +16,10 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import {
+  CreateBarParaDateMagazineDto,
+  UpdateBarParaDateMagazineDto,
+} from './dto/bar-para-date-magazine.dto';
+import {
   CreateBarStrongMagazineDto,
   UpdateBarStrongMagazineDto,
 } from './dto/bar-strong-magazine.dto';
@@ -55,5 +59,33 @@ export class BarMagazineController {
   @ApiOperation({ summary: 'Retirar promo Fuerte del local' })
   removeStrong(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.magazine.removeStrongForBar(user.sub, id);
+  }
+
+  @Get('para-date')
+  @ApiOperation({ summary: 'Listar piezas ParaDate del local (Legend)' })
+  listParaDate(@CurrentUser() user: JwtPayload) {
+    return this.magazine.listParaDateForBarOwner(user.sub);
+  }
+
+  @Post('para-date')
+  @ApiOperation({ summary: 'Publicar experiencia ParaDate (Legend)' })
+  createParaDate(@CurrentUser() user: JwtPayload, @Body() body: CreateBarParaDateMagazineDto) {
+    return this.magazine.createParaDateForBar(user.sub, body);
+  }
+
+  @Patch('para-date/:id')
+  @ApiOperation({ summary: 'Actualizar pieza ParaDate del local' })
+  updateParaDate(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() body: UpdateBarParaDateMagazineDto,
+  ) {
+    return this.magazine.updateParaDateForBar(user.sub, id, body);
+  }
+
+  @Delete('para-date/:id')
+  @ApiOperation({ summary: 'Retirar pieza ParaDate del local' })
+  removeParaDate(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.magazine.removeParaDateForBar(user.sub, id);
   }
 }

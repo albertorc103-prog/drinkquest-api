@@ -18,6 +18,17 @@ export class VenueEventsFeedService {
     const safePage = Math.max(page, 1);
     const skip = (safePage - 1) * safeLimit;
 
+    // Limpieza: ACTIVE vencidos no deben seguir como publicables.
+    await this.prisma.barVenueEvent.updateMany({
+      where: {
+        deletedAt: null,
+        status: VenueEventStatus.ACTIVE,
+        endsAt: { lt: now },
+        ...(barId ? { barId } : {}),
+      },
+      data: { status: VenueEventStatus.ARCHIVED },
+    });
+
     const where = {
       deletedAt: null,
       status: VenueEventStatus.ACTIVE,

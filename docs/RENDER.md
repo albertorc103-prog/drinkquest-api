@@ -167,8 +167,12 @@ En la raíz del repo puedes usar `backend/render.yaml` con **New Blueprint** en 
 | Script | Acción |
 |--------|--------|
 | `render:build` | Valida migraciones, `prisma generate`, `nest build` |
-| `render:start` | `prisma migrate deploy` + `node dist/main.js` |
-| `start` | Solo `node dist/main.js` (sin migraciones) |
+| `render:start` | `prisma migrate deploy` + seed + `node dist/main.js` |
+| `prod:preflight:bar-medals` | Preflight READ-ONLY Medallas v2 (External `DATABASE_URL` Render) |
+| `start` / `start:prod` | Solo `node dist/main.js` (sin migraciones) |
+
+Guía de estados CODE_READY → PRODUCTION_VALIDATED y checklist Medallas v2:
+ver [production-deploy.md](./production-deploy.md).
 
 ## Solución de problemas
 
@@ -176,5 +180,6 @@ En la raíz del repo puedes usar `backend/render.yaml` con **New Blueprint** en 
 |---------|----------------|
 | Deploy falla en build | Revisa logs; ejecuta `npm run render:build` en local |
 | 502 / timeout al arrancar | DB/Redis inalcanzables; revisa `DATABASE_URL` / `REDIS_URL` |
+| Arranque falla en migrate | Preflight PASS? Logs de migración exacta; **no** reset/db push |
 | CORS en navegador | Añade tu dominio web a `CORS_ORIGINS` |
-| App móvil no conecta | Usa `API_BASE_URL` HTTPS público, no `10.x` ni `localhost` |
+| App móvil no conecta | Usa `API_BASE_URL` HTTPS público (`drinkquest-api.onrender.com`), no API local |

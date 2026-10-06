@@ -8,6 +8,8 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Prisma, Role } from '@prisma/client';
+import { randomUUID } from 'crypto';
+import { RealtimeHub } from '../../common/realtime/realtime-hub.service';
 import { PrismaService } from '../../database/prisma.service';
 import {
   hashPassword,
@@ -22,6 +24,10 @@ import { MailService } from '../notifications/mail.service';
 import { BarSubscriptionService } from '../subscriptions/bar-subscription.service';
 import { JwtBarClaimsService } from '../subscriptions/jwt-bar-claims.service';
 import { RegisterDto } from './dto/register.dto';
+import {
+  resolveAgeVerifiedAt,
+  resolvePublicRegisterRole,
+} from './auth-register-age.logic';
 import { validateLoginIntent } from './auth-login-intent.util';
 import { AuthLoginIntent } from './enums/auth-login-intent.enum';
 import { AuthMeResponseDto } from './dto/auth-me-response.dto';
@@ -37,6 +43,12 @@ export class AuthService {
   private readonly logger = new Logger(AuthService.name);
   /** Mínimo entre reenvíos (evita bloqueo de Brevo y spam). */
   private static readonly RESEND_COOLDOWN_MS = 60_000;
+  /**
+   * Ventana de gracia para refresh concurrente del mismo token.
+   * Dentro: 401 sin revocar familia (race).
+   * Fuera: reuse sospechoso → revoca familia.
+   */
+  private static readonly REFRESH_RACE_GRACE_MS = 10_000;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -46,6 +58,7 @@ export class AuthService {
     private readonly subscriptions: BarSubscriptionService,
     private readonly jwtBarClaims: JwtBarClaimsService,
     private readonly users: UsersService,
+    private readonly realtime: RealtimeHub,
   ) {}
 
   async register(dto: RegisterDto): Promise<AuthSessionResponseDto> {
@@ -55,7 +68,12 @@ export class AuthService {
       throw new ConflictException('El email ya está registrado');
     }
 
-    const role = dto.role ?? Role.USER;
+    const role = resolvePublicRegisterRole(dto.role);
+    const ageVerifiedAt = resolveAgeVerifiedAt(
+      { birthDate: dto.birthDate, adultConfirmed: dto.adultConfirmed },
+      role,
+    );
+
     if (role === Role.BAR && !dto.businessName?.trim()) {
       throw new BadRequestException('businessName es obligatorio para cuentas BAR');
     }
@@ -72,6 +90,7 @@ export class AuthService {
             passwordHash,
             displayName,
             role,
+            ageVerifiedAt,
             deletedAt: null,
             emailVerified: false,
             emailVerifiedAt: null,
@@ -116,6 +135,7 @@ export class AuthService {
           passwordHash,
           displayName,
           role,
+          ageVerifiedAt,
         },
       });
       if (role === Role.BAR) {
@@ -150,10 +170,17 @@ export class AuthService {
   }
 
   async login(email: string, password: string, intent: AuthLoginIntent): Promise<AuthSessionResponseDto> {
+    const normalized = email.trim().toLowerCase();
     const user = await this.prisma.user.findFirst({
-      where: { email: email.trim().toLowerCase(), deletedAt: null },
+      where: { email: normalized, deletedAt: null },
     });
     if (!user || !(await verifyPassword(password, user.passwordHash))) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'auth_login_failed',
+          emailHash: sha256(normalized).slice(0, 12),
+        }),
+      );
       throw new UnauthorizedException('Credenciales incorrectas');
     }
     const bar =
@@ -166,8 +193,8 @@ export class AuthService {
     this.assertLoginIntent(user.role, bar, intent);
     this.logger.log(
       JSON.stringify({
-        event: 'auth_login',
-        userId: user.id,
+        event: 'auth_login_success',
+        userIdHash: user.id.slice(0, 8),
         role: user.role,
         intent,
       }),
@@ -186,24 +213,219 @@ export class AuthService {
   async refresh(refreshToken: string): Promise<AuthSessionResponseDto> {
     const tokenHash = sha256(refreshToken);
     const stored = await this.prisma.refreshToken.findFirst({
-      where: { tokenHash, revokedAt: null, expiresAt: { gt: new Date() } },
-      include: { user: true },
+      where: { tokenHash },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            role: true,
+            deletedAt: true,
+            securityVersion: true,
+          },
+        },
+      },
     });
-    if (!stored || stored.user.deletedAt) {
+
+    if (!stored) {
       throw new UnauthorizedException('Refresh token inválido');
     }
-    await this.prisma.refreshToken.update({
-      where: { id: stored.id },
-      data: { revokedAt: new Date() },
+
+    // Token ya rotado/revocado: race concurrente vs reuse sospechoso.
+    if (stored.revokedAt) {
+      await this.handleRevokedRefreshPresentation(stored);
+    }
+
+    if (stored.expiresAt <= new Date() || stored.user.deletedAt) {
+      throw new UnauthorizedException('Refresh token inválido');
+    }
+
+    try {
+      await this.jwt.verifyAsync(refreshToken, {
+        secret: this.config.getOrThrow<string>('auth.refreshSecret'),
+        algorithms: ['HS256'],
+      });
+    } catch {
+      throw new UnauthorizedException('Refresh token inválido');
+    }
+
+    // Rotación atómica: solo un request puede reclamar el token activo.
+    const session = await this.prisma.$transaction(async (tx) => {
+      const claimed = await tx.refreshToken.updateMany({
+        where: { id: stored.id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      if (claimed.count === 0) {
+        const again = await tx.refreshToken.findFirst({ where: { id: stored.id } });
+        if (again?.revokedAt) {
+          await this.handleRevokedRefreshPresentation(again);
+        }
+        throw new UnauthorizedException('Refresh token inválido');
+      }
+
+      const payload = await this.buildJwtPayload(
+        stored.user.id,
+        stored.user.email,
+        stored.user.role,
+        stored.user.securityVersion,
+      );
+      const tokens = await this.issueTokens(payload, stored.familyId, tx);
+      const successor = await tx.refreshToken.findFirst({
+        where: { tokenHash: sha256(tokens.refreshToken) },
+        select: { id: true },
+      });
+      if (successor) {
+        await tx.refreshToken.update({
+          where: { id: stored.id },
+          data: { replacedById: successor.id },
+        });
+      }
+      return tokens;
     });
+
     this.logger.log(
       JSON.stringify({
         event: 'auth_refresh',
-        userId: stored.user.id,
+        userIdHash: stored.user.id.slice(0, 8),
         role: stored.user.role,
       }),
     );
-    return this.issueTokensForUser(stored.user.id, stored.user.email, stored.user.role);
+    return {
+      ...session,
+      user: toAuthUserSummary({
+        id: stored.user.id,
+        email: stored.user.email,
+        role: stored.user.role,
+      }),
+    };
+  }
+
+  /**
+   * Presentación de refresh ya revocado.
+   * Race inmediata (ventana corta + replacedById): 401 sin matar familia.
+   * Reuse posterior: revoca familia.
+   * Nunca re-emite tokens desde A.
+   */
+  private async handleRevokedRefreshPresentation(stored: {
+    id: string;
+    userId: string;
+    familyId: string;
+    revokedAt: Date | null;
+    replacedById?: string | null;
+  }): Promise<never> {
+    const revokedAt = stored.revokedAt ? new Date(stored.revokedAt).getTime() : 0;
+    const ageMs = Date.now() - revokedAt;
+    const plausibleRace =
+      ageMs >= 0 &&
+      ageMs <= AuthService.REFRESH_RACE_GRACE_MS &&
+      (!!stored.replacedById || ageMs <= 2_000);
+
+    if (plausibleRace) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'refresh_race_detected',
+          userIdHash: stored.userId.slice(0, 8),
+          familyIdHash: stored.familyId.slice(0, 8),
+          ageMs,
+        }),
+      );
+      throw new UnauthorizedException('Refresh token inválido');
+    }
+
+    await this.revokeFamily(stored.familyId);
+    this.logger.warn(
+      JSON.stringify({
+        event: 'refresh_reuse_detected',
+        userIdHash: stored.userId.slice(0, 8),
+        familyIdHash: stored.familyId.slice(0, 8),
+        ageMs,
+      }),
+    );
+    throw new UnauthorizedException('Refresh token inválido');
+  }
+
+  async logout(refreshToken: string): Promise<{ ok: true }> {
+    const tokenHash = sha256(refreshToken);
+    const stored = await this.prisma.refreshToken.findFirst({
+      where: { tokenHash },
+    });
+    if (stored && !stored.revokedAt) {
+      // Logout de dispositivo: revoca la familia/sesión actual (no otras).
+      await this.revokeFamily(stored.familyId);
+      this.logger.log(
+        JSON.stringify({
+          event: 'auth_logout',
+          userIdHash: stored.userId.slice(0, 8),
+          familyIdHash: stored.familyId.slice(0, 8),
+        }),
+      );
+    }
+    // Respuesta uniforme (no filtrar si el token existía). Access residual ≤15m por diseño.
+    return { ok: true };
+  }
+
+  async logoutAll(userId: string): Promise<{ ok: true; revoked: number }> {
+    const result = await this.bumpSecurityAndRevokeAll(userId, 'logout_all');
+    await this.prisma.deviceToken.deleteMany({ where: { userId } });
+    this.realtime.disconnectUser(userId);
+    this.logger.log(
+      JSON.stringify({
+        event: 'logout_all',
+        userIdHash: userId.slice(0, 8),
+        revoked: result,
+      }),
+    );
+    return { ok: true, revoked: result };
+  }
+
+  async changePassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<AuthSessionResponseDto> {
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, deletedAt: null },
+      select: { id: true, email: true, role: true, passwordHash: true, securityVersion: true },
+    });
+    if (!user) throw new UnauthorizedException('Usuario no encontrado');
+    if (!(await verifyPassword(currentPassword, user.passwordHash))) {
+      throw new UnauthorizedException('Contraseña actual incorrecta');
+    }
+    if (newPassword.trim().length < 8) {
+      throw new BadRequestException('La nueva contraseña debe tener al menos 8 caracteres.');
+    }
+    const passwordHash = await hashPassword(newPassword);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: userId },
+        data: {
+          passwordHash,
+          securityVersion: { increment: 1 },
+        },
+      });
+      await tx.refreshToken.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+    });
+    this.realtime.disconnectUser(userId);
+    this.logger.log(
+      JSON.stringify({
+        event: 'password_change_sessions_revoked',
+        userIdHash: userId.slice(0, 8),
+        securityVersion: user.securityVersion + 1,
+      }),
+    );
+    this.logger.log(
+      JSON.stringify({
+        event: 'security_version_increment',
+        userIdHash: userId.slice(0, 8),
+        reason: 'password_change',
+        securityVersion: user.securityVersion + 1,
+      }),
+    );
+    // Sesión nueva limpia; cliente debe persistir tokens.
+    return this.issueTokensForUser(user.id, user.email, user.role);
   }
 
   async forgotPassword(email: string): Promise<{ message: string }> {
@@ -244,13 +466,47 @@ export class AuthService {
       where: { tokenHash: sha256(token), usedAt: null, expiresAt: { gt: new Date() } },
     });
     if (!row) throw new BadRequestException('Token inválido o expirado');
-    await this.prisma.$transaction([
-      this.prisma.user.update({
+    if (newPassword.trim().length < 8) {
+      throw new BadRequestException('La nueva contraseña debe tener al menos 8 caracteres.');
+    }
+    const passwordHash = await hashPassword(newPassword);
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.update({
         where: { id: row.userId },
-        data: { passwordHash: await hashPassword(newPassword) },
+        data: {
+          passwordHash,
+          securityVersion: { increment: 1 },
+        },
+        select: { securityVersion: true },
+      });
+      await tx.passwordReset.update({ where: { id: row.id }, data: { usedAt: new Date() } });
+      // Single-use: invalidar otros resets pendientes.
+      await tx.passwordReset.updateMany({
+        where: { userId: row.userId, usedAt: null, id: { not: row.id } },
+        data: { usedAt: new Date() },
+      });
+      await tx.refreshToken.updateMany({
+        where: { userId: row.userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      return user;
+    });
+    this.realtime.disconnectUser(row.userId);
+    this.logger.log(
+      JSON.stringify({
+        event: 'password_reset_sessions_revoked',
+        userIdHash: row.userId.slice(0, 8),
+        securityVersion: updated.securityVersion,
       }),
-      this.prisma.passwordReset.update({ where: { id: row.id }, data: { usedAt: new Date() } }),
-    ]);
+    );
+    this.logger.log(
+      JSON.stringify({
+        event: 'security_version_increment',
+        userIdHash: row.userId.slice(0, 8),
+        reason: 'password_reset',
+        securityVersion: updated.securityVersion,
+      }),
+    );
     return { message: 'Contraseña actualizada' };
   }
 
@@ -370,29 +626,36 @@ export class AuthService {
     userId: string,
     email: string,
     role: Role,
+    familyId?: string,
   ): Promise<AuthSessionResponseDto> {
     const user = await this.prisma.user.findFirst({
       where: { id: userId, deletedAt: null },
-      select: { id: true, email: true, role: true },
+      select: { id: true, email: true, role: true, securityVersion: true },
     });
     if (!user) {
       throw new UnauthorizedException('Usuario no encontrado');
     }
-    const payload = await this.buildJwtPayload(userId, email, role);
-    const tokens = await this.issueTokens(payload);
+    const payload = await this.buildJwtPayload(userId, email, role, user.securityVersion);
+    const tokens = await this.issueTokens(payload, familyId);
     return {
       ...tokens,
       user: toAuthUserSummary(user),
     };
   }
 
-  private async buildJwtPayload(userId: string, email: string, role: Role): Promise<JwtPayload> {
+  private async buildJwtPayload(
+    userId: string,
+    email: string,
+    role: Role,
+    securityVersion: number,
+  ): Promise<JwtPayload> {
     const barClaims = await this.jwtBarClaims.buildForUser(userId, role);
     const authClaims = enrichJwtAuthClaims(role);
     return {
       sub: userId,
       email,
       role,
+      sv: securityVersion,
       ...barClaims,
       permissions: authClaims.permissions,
       accountType: authClaims.accountType,
@@ -400,33 +663,88 @@ export class AuthService {
     };
   }
 
-  private async issueTokens(payload: JwtPayload): Promise<{
+  private async issueTokens(
+    payload: JwtPayload,
+    familyId?: string,
+    db: Prisma.TransactionClient | PrismaService = this.prisma,
+  ): Promise<{
     accessToken: string;
     refreshToken: string;
     expiresIn: string;
   }> {
-    const accessSecret = this.config.get<string>('auth.accessSecret')!;
-    const refreshSecret = this.config.get<string>('auth.refreshSecret')!;
+    const accessSecret = this.config.getOrThrow<string>('auth.accessSecret');
+    const refreshSecret = this.config.getOrThrow<string>('auth.refreshSecret');
     const accessExpires = this.config.get<string>('auth.accessExpires', '15m');
     const refreshExpires = this.config.get<string>('auth.refreshExpires', '7d');
+    const family = familyId ?? randomUUID();
 
     const accessToken = await this.jwt.signAsync(
-      { ...payload, role: payload.role },
-      { secret: accessSecret, expiresIn: accessExpires as `${number}d` | `${number}h` | `${number}m` },
+      { ...payload, role: payload.role, sv: payload.sv ?? 0 },
+      {
+        secret: accessSecret,
+        algorithm: 'HS256',
+        expiresIn: accessExpires as `${number}d` | `${number}h` | `${number}m`,
+      },
     );
     const refreshToken = await this.jwt.signAsync(
-      { sub: payload.sub, type: 'refresh' },
-      { secret: refreshSecret, expiresIn: refreshExpires as `${number}d` | `${number}h` | `${number}m` },
+      { sub: payload.sub, type: 'refresh', fid: family, jti: randomUUID() },
+      {
+        secret: refreshSecret,
+        algorithm: 'HS256',
+        expiresIn: refreshExpires as `${number}d` | `${number}h` | `${number}m`,
+      },
     );
     const refreshMs = this.parseExpiry(refreshExpires);
-    await this.prisma.refreshToken.create({
+    await db.refreshToken.create({
       data: {
         userId: payload.sub,
+        familyId: family,
         tokenHash: sha256(refreshToken),
         expiresAt: new Date(Date.now() + refreshMs),
       },
     });
     return { accessToken, refreshToken, expiresIn: accessExpires };
+  }
+
+  private async revokeFamily(familyId: string): Promise<number> {
+    const result = await this.prisma.refreshToken.updateMany({
+      where: { familyId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    return result.count;
+  }
+
+  async revokeAllForUser(userId: string): Promise<number> {
+    const result = await this.prisma.refreshToken.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    return result.count;
+  }
+
+  /** Incrementa securityVersion y revoca todos los refresh (eventos de seguridad globales). */
+  private async bumpSecurityAndRevokeAll(userId: string, reason: string): Promise<number> {
+    const result = await this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.update({
+        where: { id: userId },
+        data: { securityVersion: { increment: 1 } },
+        select: { securityVersion: true },
+      });
+      const revoked = await tx.refreshToken.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      this.logger.log(
+        JSON.stringify({
+          event: 'security_version_increment',
+          userIdHash: userId.slice(0, 8),
+          reason,
+          securityVersion: user.securityVersion,
+        }),
+      );
+      return revoked.count;
+    });
+    return result;
   }
 
   private parseExpiry(exp: string): number {

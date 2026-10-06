@@ -5,7 +5,7 @@ import {
 export type ReservationRow = {
   id: string;
   barId: string;
-  userId: string;
+  userId: string | null;
   guestName: string;
   partySize: number;
   reservedFor: Date;
@@ -27,7 +27,7 @@ export type ReservationRow = {
     id: string;
     displayName: string;
     email: string;
-  };
+  } | null;
 };
 
 export function mapReservation(row: ReservationRow) {

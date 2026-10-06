@@ -1,5 +1,11 @@
 # Desarrollo — DrinkQuest API
 
+> **Validación operativa DrinkQuest (Medallas v2 y smoke funcionales):**
+> Render Producción + PostgreSQL Render.
+> Ver [production-deploy.md](./production-deploy.md) y `npm run prod:preflight:bar-medals`.
+> No uses `migrate reset` / `migrate dev` / `db push` contra la DB de Render.
+> Docker Compose abajo es opcional para otros flujos de desarrollo; **no** es el entorno de validación de Medallas v2.
+
 ## 1. Variables de entorno
 
 Copia `.env.example` → `.env`. Obligatorias:

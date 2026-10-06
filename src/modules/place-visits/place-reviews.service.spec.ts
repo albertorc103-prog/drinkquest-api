@@ -64,6 +64,26 @@ function makePrismaMock() {
       findFirst: jest.fn(async ({ where }: any) => {
         return reviews.find((r) => matchWhere(r, where)) ?? null;
       }),
+      upsert: jest.fn(async ({ where, create, update }: any) => {
+        const key = where?.userId_placeKey;
+        const existing = reviews.find(
+          (r) => r.userId === key?.userId && r.placeKey === key?.placeKey,
+        );
+        if (existing) {
+          Object.assign(existing, update, {
+            updatedAt: new Date('2026-09-21T13:00:00.000Z'),
+          });
+          return existing;
+        }
+        const row = {
+          id: `rev-${reviews.length + 1}`,
+          createdAt: new Date('2026-09-21T12:00:00.000Z'),
+          updatedAt: new Date('2026-09-21T12:00:00.000Z'),
+          ...create,
+        };
+        reviews.push(row);
+        return row;
+      }),
       create: jest.fn(async ({ data }: any) => {
         const row = {
           id: `rev-${reviews.length + 1}`,
@@ -93,7 +113,14 @@ function makePrismaMock() {
 }
 
 function matchWhere(row: any, where: any): boolean {
+  if (where.OR && Array.isArray(where.OR)) {
+    const base = { ...where };
+    delete base.OR;
+    const baseOk = Object.keys(base).length === 0 || matchWhere(row, base);
+    return baseOk && where.OR.some((clause: any) => matchWhere(row, clause));
+  }
   if (where.userId && row.userId !== where.userId) return false;
+  if (where.placeKey && row.placeKey !== where.placeKey) return false;
   if (where.googlePlaceId && row.googlePlaceId !== where.googlePlaceId) {
     return false;
   }
@@ -150,6 +177,7 @@ describe('PlaceReviewsService', () => {
       barId: 'bar-1',
       externalPlaceId: 'ext-1',
       googlePlaceId: 'ChIJ_sheldonz',
+      placeKey: 'ChIJ_sheldonz',
       rating: 3,
       comment: null,
       createdAt: new Date('2026-09-20T12:00:00.000Z'),

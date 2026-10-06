@@ -94,7 +94,7 @@ export class SpecialDrinksService {
 
   /**
    * Edición: si ya estaba aprobada/rechazada/marcada, vuelve a revisión.
-   * Legend puede cambiar rareza dentro de cupos; Intermedio fuerza COMMON.
+   * Legend puede cambiar rareza dentro de cupos; Mixologist fuerza COMMON.
    */
   async update(ownerUserId: string, drinkId: string, dto: UpdateSpecialDrinkDto) {
     const { plan } = await this.assertOwnerCanManageSpecialDrinks(ownerUserId);
@@ -197,7 +197,7 @@ export class SpecialDrinksService {
     const rarity = requested ?? DrinkRarity.COMMON;
     if (plan === SubscriptionPlan.INTERMEDIATE && rarity !== DrinkRarity.COMMON) {
       throw new BadRequestException(
-        'El plan Intermedio solo permite bebidas especializadas de rareza común.',
+        'El plan Mixologist solo permite bebidas especializadas de rareza común.',
       );
     }
     const quotas = specialDrinkQuotasForPlan(plan);
@@ -271,7 +271,7 @@ export class SpecialDrinksService {
     const plan = normalizeSubscriptionPlan(ctx.subscription?.plan);
     if (!specialDrinksEnabledForPlan(plan)) {
       throw new ForbiddenException(
-        'Las bebidas especializadas son exclusivas de los planes Intermedio y Legend.',
+        'Las bebidas especializadas son exclusivas de los planes Mixologist y Legend.',
       );
     }
     return { bar: ctx.bar, plan };

@@ -242,18 +242,20 @@ export class ReservationsService {
         },
       },
     });
-    await this.notifications.create(
-      updated.userId,
-      NotificationType.RESERVATION_CONFIRMED,
-      'Reserva confirmada',
-      `${updated.bar.businessName} confirmó tu mesa para ${updated.partySize} el ${formatReservationWhen(updated.reservedFor)}.`,
-      { reservationId: updated.id, barId: updated.barId, category: 'reservations' },
-    );
-    await this.barMissions.onReservationConfirmed(
-      updated.userId,
-      updated.barId,
-      updated.partySize,
-    );
+    if (updated.userId) {
+      await this.notifications.create(
+        updated.userId,
+        NotificationType.RESERVATION_CONFIRMED,
+        'Reserva confirmada',
+        `${updated.bar.businessName} confirmó tu mesa para ${updated.partySize} el ${formatReservationWhen(updated.reservedFor)}.`,
+        { reservationId: updated.id, barId: updated.barId, category: 'reservations' },
+      );
+      await this.barMissions.onReservationConfirmed(
+        updated.userId,
+        updated.barId,
+        updated.partySize,
+      );
+    }
     return mapReservation(updated);
   }
 
@@ -284,13 +286,15 @@ export class ReservationsService {
         },
       },
     });
-    await this.notifications.create(
-      updated.userId,
-      NotificationType.RESERVATION_DECLINED,
-      'Reserva no disponible',
-      `${updated.bar.businessName}: ${reason}`,
-      { reservationId: updated.id, barId: updated.barId, category: 'reservations' },
-    );
+    if (updated.userId) {
+      await this.notifications.create(
+        updated.userId,
+        NotificationType.RESERVATION_DECLINED,
+        'Reserva no disponible',
+        `${updated.bar.businessName}: ${reason}`,
+        { reservationId: updated.id, barId: updated.barId, category: 'reservations' },
+      );
+    }
     return mapReservation(updated);
   }
 
@@ -349,13 +353,15 @@ export class ReservationsService {
         },
       },
     });
-    await this.notifications.create(
-      updated.userId,
-      NotificationType.RESERVATION_CANCELLED,
-      'Reserva cancelada por el local',
-      `${updated.bar.businessName} canceló tu reserva del ${formatReservationWhen(updated.reservedFor)}.`,
-      { reservationId: updated.id, barId: updated.barId, category: 'reservations' },
-    );
+    if (updated.userId) {
+      await this.notifications.create(
+        updated.userId,
+        NotificationType.RESERVATION_CANCELLED,
+        'Reserva cancelada por el local',
+        `${updated.bar.businessName} canceló tu reserva del ${formatReservationWhen(updated.reservedFor)}.`,
+        { reservationId: updated.id, barId: updated.barId, category: 'reservations' },
+      );
+    }
     return mapReservation(updated);
   }
 
@@ -407,6 +413,7 @@ export class ReservationsService {
     });
 
     for (const row of expired) {
+      if (!row.userId) continue;
       await this.notifications.create(
         row.userId,
         NotificationType.RESERVATION_CANCELLED,

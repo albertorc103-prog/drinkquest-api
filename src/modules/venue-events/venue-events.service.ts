@@ -31,6 +31,8 @@ export class VenueEventsService {
 
   async listForOwner(ownerUserId: string) {
     const { bar } = await this.assertOwnerCanManage(ownerUserId);
+    // Expire-on-list: ACTIVE con endsAt pasado deja de ser publicable.
+    await this.archiveExpiredActive(bar.id);
     const rows = await this.prisma.barVenueEvent.findMany({
       where: { barId: bar.id, deletedAt: null },
       orderBy: { createdAt: 'desc' },
@@ -39,6 +41,19 @@ export class VenueEventsService {
       items: rows.map(mapVenueEvent),
       policyLines: [...VENUE_EVENT_POLICY_LINES],
     };
+  }
+
+  /** Archiva eventos ACTIVE cuya ventana ya terminó. */
+  private async archiveExpiredActive(barId: string, now: Date = new Date()) {
+    await this.prisma.barVenueEvent.updateMany({
+      where: {
+        barId,
+        deletedAt: null,
+        status: VenueEventStatus.ACTIVE,
+        endsAt: { lt: now },
+      },
+      data: { status: VenueEventStatus.ARCHIVED },
+    });
   }
 
   async create(ownerUserId: string, dto: CreateVenueEventDto) {

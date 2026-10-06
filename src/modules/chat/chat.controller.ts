@@ -1,5 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
@@ -52,6 +53,7 @@ export class ChatController {
   }
 
   @Post('rooms/:roomId/messages')
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
   async send(
     @CurrentUser() user: JwtPayload,
     @Param('roomId') roomId: string,

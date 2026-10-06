@@ -3,6 +3,7 @@ import {
   SpecialDrinkApprovalStatus,
   SpecialDrinkStatus,
 } from '@prisma/client';
+import { isOfficialCatalogDrink } from '../../common/catalog/canonical-catalog.util';
 import { PrismaService } from '../../database/prisma.service';
 import { evaluateSubscriptionActive } from '../subscriptions/bar-access.rules';
 import { mapSpecialDrink } from '../special-drinks/mappers/special-drink.mapper';
@@ -73,6 +74,7 @@ export class PlaceBarDrinksService {
               imageUrl: true,
               imageKey: true,
               description: true,
+              legacyId: true,
               sourceSpecialDrinkId: true,
               deletedAt: true,
             },
@@ -99,19 +101,11 @@ export class PlaceBarDrinksService {
         .map((s) => s.catalogDrinkId)
         .filter((id): id is string => Boolean(id)),
     );
-    const houseSpecialIds = new Set(specials.map((s) => s.id));
 
-    // Carta estándar: sin repetir bebidas de la casa (especiales materializadas).
+    // Carta estándar: solo las 100 oficiales (nombre + legacyId). Excluye set antiguo.
     const menuDrinks = menuItems
-      .filter((m) => m.drink && m.drink.deletedAt == null)
-      .filter((m) => {
-        const drink = m.drink!;
-        if (drink.sourceSpecialDrinkId && houseSpecialIds.has(drink.sourceSpecialDrinkId)) {
-          return false;
-        }
-        if (houseDrinkIds.has(drink.id)) return false;
-        return true;
-      })
+      .filter((m) => m.drink && isOfficialCatalogDrink(m.drink))
+      .filter((m) => !houseDrinkIds.has(m.drink!.id))
       .map((m) => ({
         drinkId: m.drink!.id,
         name: m.drink!.name,

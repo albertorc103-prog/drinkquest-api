@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   Logger,
 } from '@nestjs/common';
@@ -11,6 +12,7 @@ import {
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
+import { assertAgeGateForSensitiveAction } from '../../common/utils/age-gate.util';
 import { evaluateSubscriptionActive } from '../subscriptions/bar-access.rules';
 import { CheckInPlaceDto } from './dto/check-in-place.dto';
 import {
@@ -22,7 +24,9 @@ import { ExternalPlaceService } from './external-place.service';
 import { PLACE_VISIT_CONFIG } from './place-visit.config';
 import { calendarDateInTimeZone, haversineMeters } from './place-visit.geo';
 import { collectionKey } from './place-visit.identity';
+import { validateCheckInLocationFix } from './place-visit.location';
 import { levelFromTotalXp, xpForVisit } from './place-visit.rewards';
+import { BarMissionMedalActivityService } from '../bar-missions/bar-mission-medal-activity.service';
 
 type BarWithSub = Bar & { subscription: BarSubscription | null };
 
@@ -44,6 +48,7 @@ export class PlaceVisitsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly externalPlaces: ExternalPlaceService,
+    private readonly medalActivity: BarMissionMedalActivityService,
   ) {}
 
   async checkIn(
@@ -51,6 +56,30 @@ export class PlaceVisitsService {
     dto: CheckInPlaceDto,
     now: Date = new Date(),
   ): Promise<PlaceCheckInResponseDto> {
+    const actor = await this.prisma.user.findFirst({
+      where: { id: userId, deletedAt: null },
+      select: {
+        id: true,
+        role: true,
+        ageVerifiedAt: true,
+        createdAt: true,
+      },
+    });
+    if (!actor) {
+      return this.fail('FORBIDDEN', 'Usuario no autorizado.');
+    }
+    try {
+      assertAgeGateForSensitiveAction(actor);
+    } catch (err) {
+      if (err instanceof ForbiddenException) {
+        return this.fail(
+          'FORBIDDEN',
+          'Tu cuenta no tiene verificación de mayoría de edad.',
+        );
+      }
+      throw err;
+    }
+
     const barId = dto.barId?.trim() || undefined;
     const googlePlaceId = dto.googlePlaceId?.trim() || undefined;
 
@@ -58,16 +87,23 @@ export class PlaceVisitsService {
       return this.fail('BAD_REQUEST', 'Se requiere barId o googlePlaceId.');
     }
 
-    if (
-      dto.accuracy == null ||
-      !Number.isFinite(dto.accuracy) ||
-      dto.accuracy > PLACE_VISIT_CONFIG.MAX_CHECK_IN_ACCURACY_METERS
-    ) {
-      return this.fail(
-        'INACCURATE',
-        `Precisión GPS insuficiente (máx. ${PLACE_VISIT_CONFIG.MAX_CHECK_IN_ACCURACY_METERS} m).`,
-        { distanceMeters: undefined },
-      );
+    const fix = validateCheckInLocationFix(
+      {
+        latitude: dto.latitude,
+        longitude: dto.longitude,
+        accuracy: dto.accuracy,
+        capturedAtMs: dto.capturedAtMs,
+      },
+      now,
+    );
+    if (!fix.ok) {
+      const status =
+        fix.code === 'LOCATION_TOO_INACCURATE'
+          ? 'INACCURATE'
+          : fix.code === 'LOCATION_STALE' || fix.code === 'LOCATION_FUTURE'
+            ? 'LOCATION_STALE'
+            : 'LOCATION_INVALID';
+      return this.fail(status, fix.message);
     }
 
     let target: ResolvedTarget;
@@ -85,6 +121,7 @@ export class PlaceVisitsService {
       throw err;
     }
 
+    // Distancia SIEMPRE en servidor (ignorar cualquier distance del cliente).
     const distanceMeters = haversineMeters(
       dto.latitude,
       dto.longitude,
@@ -148,14 +185,18 @@ export class PlaceVisitsService {
     }
 
     const firstVisit = prior.length === 0;
+    // XP SIEMPRE en servidor.
     const xpAwarded = xpForVisit(target.rewardTier, firstVisit);
 
     try {
       const result = await this.prisma.$transaction(async (tx) => {
-        const user = await tx.user.findUniqueOrThrow({
-          where: { id: userId },
+        const user = await tx.user.findFirst({
+          where: { id: userId, deletedAt: null },
           select: { totalXp: true, level: true },
         });
+        if (!user) {
+          throw new ForbiddenException('Usuario no autorizado.');
+        }
         const totalXp = user.totalXp + xpAwarded;
         const level = levelFromTotalXp(totalXp);
 
@@ -167,9 +208,10 @@ export class PlaceVisitsService {
             googlePlaceId: target.googlePlaceId,
             visitDate,
             visitedAt: now,
-            latitude: dto.latitude,
-            longitude: dto.longitude,
-            accuracy: dto.accuracy,
+            // FASE 3 minimización: no persistir coords exactas del usuario.
+            latitude: null,
+            longitude: null,
+            accuracy: null,
             distanceMeters,
             xpAwarded,
             firstVisit,
@@ -184,6 +226,26 @@ export class PlaceVisitsService {
 
         return { visit, totalXp, level };
       });
+
+      this.logger.log(
+        JSON.stringify({
+          event: 'place_check_in',
+          status: firstVisit ? 'FIRST_VISIT' : 'RETURN_VISIT',
+          visitId: result.visit.id,
+          userIdHash: userId.slice(0, 8),
+          xpAwarded,
+          // Sin lat/lng exactas del usuario.
+          distanceBucketM: Math.round(distanceMeters / 10) * 10,
+          accuracyOk: true,
+        }),
+      );
+
+      // Hook secundario post-commit: barId null (POI externo) → no-op.
+      await this.medalActivity.onVisitRegistered(
+        userId,
+        target.bar?.id ?? null,
+        now,
+      );
 
       return {
         status: firstVisit ? 'FIRST_VISIT' : 'RETURN_VISIT',
@@ -200,6 +262,9 @@ export class PlaceVisitsService {
         drinkQuestPartner: target.drinkQuestPartner,
       };
     } catch (err) {
+      if (err instanceof ForbiddenException) {
+        return this.fail('FORBIDDEN', 'Usuario no autorizado.');
+      }
       if (isUniqueViolation(err)) {
         return this.fail('ALREADY_VISITED_TODAY', 'Ya registraste este lugar hoy.', {
           xpAwarded: 0,
@@ -212,7 +277,13 @@ export class PlaceVisitsService {
           rewardTier: target.rewardTier,
         });
       }
-      this.logger.error('checkIn failed', err instanceof Error ? err.stack : err);
+      this.logger.error(
+        JSON.stringify({
+          event: 'place_check_in_failed',
+          // Sin coords del usuario en logs de error.
+          message: err instanceof Error ? err.message : 'unknown',
+        }),
+      );
       throw err;
     }
   }

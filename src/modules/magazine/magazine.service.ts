@@ -9,9 +9,16 @@ import { PrismaService } from '../../database/prisma.service';
 import { BarAccessService } from '../subscriptions/bar-access.service';
 import {
   normalizeSubscriptionPlan,
+  paraDateMagazinePromoEnabledForPlan,
+  paraDateMagazinePromoLimit,
   strongMagazinePromoEnabledForPlan,
   strongMagazinePromoLimit,
 } from '../subscriptions/subscription-plan.util';
+import {
+  CreateBarParaDateMagazineDto,
+  PARA_DATE_PROMO_CATEGORIES,
+  UpdateBarParaDateMagazineDto,
+} from './dto/bar-para-date-magazine.dto';
 import {
   CreateBarStrongMagazineDto,
   STRONG_PROMO_CATEGORIES,
@@ -249,12 +256,111 @@ export class MagazineService {
     return { ok: true };
   }
 
+  async listParaDateForBarOwner(ownerUserId: string) {
+    const { bar } = await this.requireParaDateLegendBar(ownerUserId);
+    return this.prisma.magazineEditorial.findMany({
+      where: {
+        section: MagazineSection.PARA_DATE,
+        barId: bar.id,
+        deletedAt: null,
+      },
+      include: this.include,
+      orderBy: [{ published: 'desc' }, { updatedAt: 'desc' }],
+    });
+  }
+
+  async createParaDateForBar(ownerUserId: string, dto: CreateBarParaDateMagazineDto) {
+    const { bar } = await this.requireParaDateLegendBar(ownerUserId);
+    await this.assertParaDateQuota(bar.id);
+    if (dto.drinkId) await this.assertDrinkExists(dto.drinkId);
+
+    const category = this.normalizeParaDateCategory(dto.category);
+    const published = dto.published !== false;
+
+    return this.prisma.magazineEditorial.create({
+      data: {
+        section: MagazineSection.PARA_DATE,
+        title: dto.title.trim(),
+        teaser: dto.teaser.trim(),
+        category,
+        imageUrl: dto.imageUrl?.trim() || null,
+        statusBadge: 'PARA DATE',
+        etaLabel: 'CITA',
+        barId: bar.id,
+        drinkId: dto.drinkId || null,
+        venueNote: dto.venueNote?.trim() || null,
+        sortOrder: 160,
+        published,
+        publishedAt: published ? new Date() : null,
+      },
+      include: this.include,
+    });
+  }
+
+  async updateParaDateForBar(
+    ownerUserId: string,
+    id: string,
+    dto: UpdateBarParaDateMagazineDto,
+  ) {
+    const { bar } = await this.requireParaDateLegendBar(ownerUserId);
+    const existing = await this.requireOwnedParaDate(bar.id, id);
+
+    if (dto.published === true && !existing.published) {
+      await this.assertParaDateQuota(bar.id, existing.id);
+    }
+    if (dto.drinkId) await this.assertDrinkExists(dto.drinkId);
+
+    const published = dto.published;
+    return this.prisma.magazineEditorial.update({
+      where: { id: existing.id },
+      data: {
+        ...(dto.title !== undefined ? { title: dto.title.trim() } : {}),
+        ...(dto.teaser !== undefined ? { teaser: dto.teaser.trim() } : {}),
+        ...(dto.category !== undefined
+          ? { category: this.normalizeParaDateCategory(dto.category) }
+          : {}),
+        ...(dto.imageUrl !== undefined ? { imageUrl: dto.imageUrl?.trim() || null } : {}),
+        ...(dto.drinkId !== undefined ? { drinkId: dto.drinkId || null } : {}),
+        ...(dto.venueNote !== undefined ? { venueNote: dto.venueNote?.trim() || null } : {}),
+        ...(published !== undefined
+          ? {
+              published,
+              publishedAt: published ? existing.publishedAt ?? new Date() : null,
+              statusBadge: published ? 'PARA DATE' : 'BORRADOR',
+            }
+          : {}),
+      },
+      include: this.include,
+    });
+  }
+
+  async removeParaDateForBar(ownerUserId: string, id: string) {
+    const { bar } = await this.requireParaDateLegendBar(ownerUserId);
+    const existing = await this.requireOwnedParaDate(bar.id, id);
+    await this.prisma.magazineEditorial.update({
+      where: { id: existing.id },
+      data: { deletedAt: new Date(), published: false },
+    });
+    return { ok: true };
+  }
+
   private async requireLegendBar(ownerUserId: string) {
     const resolved = await this.barAccess.resolveByOwnerUserId(ownerUserId);
     const plan = normalizeSubscriptionPlan(resolved.subscription?.plan);
     if (!strongMagazinePromoEnabledForPlan(plan)) {
       throw new ForbiddenException(
         'Publicar en la sección Fuerte es exclusivo del plan Legend.',
+      );
+    }
+    return resolved;
+  }
+
+  private async requireParaDateLegendBar(ownerUserId: string) {
+    const resolved = await this.barAccess.resolveByOwnerUserId(ownerUserId);
+    const plan = normalizeSubscriptionPlan(resolved.subscription?.plan);
+    if (!paraDateMagazinePromoEnabledForPlan(plan)) {
+      throw new ForbiddenException(
+        'Publicar en ParaDate es exclusivo del plan Legend.',
       );
     }
     return resolved;
@@ -270,6 +376,19 @@ export class MagazineService {
       },
     });
     if (!existing) throw new NotFoundException('Promo Fuerte no encontrada.');
+    return existing;
+  }
+
+  private async requireOwnedParaDate(barId: string, id: string) {
+    const existing = await this.prisma.magazineEditorial.findFirst({
+      where: {
+        id,
+        barId,
+        section: MagazineSection.PARA_DATE,
+        deletedAt: null,
+      },
+    });
+    if (!existing) throw new NotFoundException('Promo ParaDate no encontrada.');
     return existing;
   }
 
@@ -291,6 +410,24 @@ export class MagazineService {
     }
   }
 
+  private async assertParaDateQuota(barId: string, excludeId?: string) {
+    const publishedCount = await this.prisma.magazineEditorial.count({
+      where: {
+        barId,
+        section: MagazineSection.PARA_DATE,
+        published: true,
+        deletedAt: null,
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+      },
+    });
+    const limit = paraDateMagazinePromoLimit();
+    if (publishedCount >= limit) {
+      throw new BadRequestException(
+        `Límite de ${limit} promos publicadas en ParaDate. Retira una para publicar otra.`,
+      );
+    }
+  }
+
   private async assertDrinkExists(drinkId: string) {
     const drink = await this.prisma.drink.findFirst({
       where: { id: drinkId, deletedAt: null },
@@ -303,6 +440,17 @@ export class MagazineService {
     const v = String(raw ?? 'SHOT').trim().toUpperCase();
     if ((STRONG_PROMO_CATEGORIES as readonly string[]).includes(v)) return v;
     return 'SHOT';
+  }
+
+  private normalizeParaDateCategory(raw?: string): string {
+    const v = String(raw ?? 'ELEGANTE')
+      .trim()
+      .toUpperCase()
+      .normalize('NFD')
+      .replace(/\p{M}/gu, '');
+    if ((PARA_DATE_PROMO_CATEGORIES as readonly string[]).includes(v)) return v;
+    if (v === 'ROMANTICO' || v.includes('ROMANT')) return 'ROMANTICO';
+    return 'ELEGANTE';
   }
 
   private assertSection(section: MagazineSection) {

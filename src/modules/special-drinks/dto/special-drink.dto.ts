@@ -37,7 +37,7 @@ export class CreateSpecialDrinkDto {
   @ApiPropertyOptional({
     enum: DrinkRarity,
     description:
-      'Rareza solicitada. Intermedio solo COMMON. Legend: cupos 5C / 3R / 2E / 1L.',
+      'Rareza solicitada. Mixologist solo COMMON. Legend: cupos 5C / 3R / 2E / 1L.',
     default: DrinkRarity.COMMON,
   })
   @IsOptional()

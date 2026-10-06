@@ -250,18 +250,43 @@ export class FeedService {
 
   async feed(page = 1, limit = 20, viewerId?: string) {
     const skip = (page - 1) * limit;
+    const where: Prisma.FeedPostWhereInput = {
+      deletedAt: null,
+      ...(viewerId ? await this.authorNotBlockedWhere(viewerId) : {}),
+    };
     const [items, total] = await Promise.all([
       this.prisma.feedPost.findMany({
-        where: { deletedAt: null },
+        where,
         include: this.postInclude(viewerId),
         orderBy: { createdAt: 'desc' },
         skip,
         take: limit,
       }),
-      this.prisma.feedPost.count({ where: { deletedAt: null } }),
+      this.prisma.feedPost.count({ where }),
     ]);
     const enriched = await this.enrichUnlockMeta(items);
     return { items: enriched.map((p) => this.mapPost(p)), total, page, limit };
+  }
+
+  /** Excluye autores con bloqueo bidireccional (viewer↔author) antes de paginar. */
+  private async authorNotBlockedWhere(
+    viewerId: string,
+  ): Promise<Prisma.FeedPostWhereInput> {
+    const blocks = await this.prisma.userBlock.findMany({
+      where: {
+        OR: [{ initiatorId: viewerId }, { targetId: viewerId }],
+      },
+      select: { initiatorId: true, targetId: true },
+    });
+    if (!blocks.length) return {};
+    const blockedIds = new Set<string>();
+    for (const b of blocks) {
+      if (b.initiatorId === viewerId) blockedIds.add(b.targetId);
+      if (b.targetId === viewerId) blockedIds.add(b.initiatorId);
+    }
+    blockedIds.delete(viewerId);
+    if (!blockedIds.size) return {};
+    return { authorId: { notIn: [...blockedIds] } };
   }
 
   /** Completa imagen/rareza de unlocks antiguos que solo tenían drinkId en meta. */

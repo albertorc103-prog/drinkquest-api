@@ -84,32 +84,65 @@ export class PlaceReviewsService {
       googlePlaceId: dto.googlePlaceId,
     });
     const comment = dto.comment?.trim() || null;
-
-    const existing = await this.prisma.placeReview.findFirst({
-      where: { userId, ...this.whereForIdentity(identity) },
-    });
+    const placeKey = this.placeKeyFor(identity);
 
     const data: Prisma.PlaceReviewUncheckedCreateInput = {
       userId,
       barId: identity.barId,
       externalPlaceId: identity.externalPlaceId,
       googlePlaceId: identity.googlePlaceId,
+      placeKey,
       rating: dto.rating,
       comment,
     };
+    const updateData = {
+      rating: dto.rating,
+      comment,
+      barId: identity.barId,
+      externalPlaceId: identity.externalPlaceId,
+      googlePlaceId: identity.googlePlaceId,
+      placeKey,
+    };
 
-    const saved = existing
-      ? await this.prisma.placeReview.update({
+    let saved;
+    try {
+      saved = await this.prisma.placeReview.upsert({
+        where: { userId_placeKey: { userId, placeKey } },
+        create: data,
+        update: updateData,
+      });
+    } catch {
+      // Sin UNIQUE (duplicados legacy) o carrera: find → update/create + P2002 retry.
+      const existing = await this.prisma.placeReview.findFirst({
+        where: { userId, OR: [{ placeKey }, this.whereForIdentity(identity)] },
+      });
+      if (existing) {
+        saved = await this.prisma.placeReview.update({
           where: { id: existing.id },
-          data: {
-            rating: dto.rating,
-            comment,
-            barId: identity.barId,
-            externalPlaceId: identity.externalPlaceId,
-            googlePlaceId: identity.googlePlaceId,
-          },
-        })
-      : await this.prisma.placeReview.create({ data });
+          data: updateData,
+        });
+      } else {
+        try {
+          saved = await this.prisma.placeReview.create({ data });
+        } catch (createErr) {
+          if (
+            createErr instanceof Prisma.PrismaClientKnownRequestError &&
+            createErr.code === 'P2002'
+          ) {
+            const raced = await this.prisma.placeReview.findFirst({
+              where: { userId, placeKey },
+            });
+            if (!raced) throw createErr;
+            saved = await this.prisma.placeReview.update({
+              where: { id: raced.id },
+              data: updateData,
+            });
+          } else {
+            throw createErr;
+          }
+        }
+      }
+    }
 
     return this.listForPlace(userId, {
       barId: identity.barId ?? undefined,
@@ -118,6 +151,15 @@ export class PlaceReviewsService {
       ...page,
       savedReviewId: saved.id,
     }));
+  }
+
+  private placeKeyFor(identity: {
+    barId: string | null;
+    googlePlaceId: string | null;
+  }): string {
+    if (identity.googlePlaceId) return identity.googlePlaceId;
+    if (identity.barId) return `bar:${identity.barId}`;
+    throw new BadRequestException('Identidad de lugar inválida.');
   }
 
   private whereForIdentity(identity: {

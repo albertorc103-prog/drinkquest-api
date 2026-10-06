@@ -15,6 +15,11 @@ export interface JwtPayload extends BarJwtClaims {
   sub: string;
   email: string;
   role: Role;
+  /**
+   * securityVersion del usuario al emitir el access token.
+   * Obligatorio en tokens nuevos (FASE 5.1); JwtStrategy rechaza si falta o no coincide.
+   */
+  sv?: number;
   /** Opcional en tokens legacy; JwtStrategy los rehidrata desde role. */
   permissions?: AuthPermission[];
   accountType?: AccountType;

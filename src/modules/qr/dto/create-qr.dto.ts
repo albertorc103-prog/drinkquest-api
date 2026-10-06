@@ -13,7 +13,7 @@ export class CreateQrDto {
   legacyDrinkId?: number;
 
   @ApiPropertyOptional({
-    description: 'UUID de bebida especializada aprobada del bar (plan Intermedio/Legend)',
+    description: 'UUID de bebida especializada aprobada del bar (plan Mixologist/Legend)',
   })
   @ValidateIf((o) => !o.drinkId && !o.legacyDrinkId)
   @IsUUID()

@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsInt, IsObject, IsOptional, Min } from 'class-validator';
+import { IsInt, IsObject, IsOptional, Max, Min } from 'class-validator';
 
 export class QuestProgressEntryDto {
   @ApiPropertyOptional()
@@ -18,6 +18,7 @@ export class QuestProgressEntryDto {
   @IsOptional()
   @IsInt()
   @Min(0)
+  @Max(200)
   xpReward?: number;
 
   @ApiPropertyOptional({
@@ -46,6 +47,7 @@ export class AchievementProgressEntryDto {
   @IsOptional()
   @IsInt()
   @Min(0)
+  @Max(200)
   xpReward?: number;
 }
 
@@ -85,30 +87,35 @@ export class UserGamificationDto {
 }
 
 export class SyncGamificationDto {
-  @ApiPropertyOptional()
+  /** Ignorado (FASE 4.1): coins solo vía ledger servidor. */
+  @ApiPropertyOptional({ deprecated: true, description: 'Ignorado — no autoridad cliente' })
   @IsOptional()
   @IsInt()
   @Min(0)
   coins?: number;
 
-  @ApiPropertyOptional()
+  /** Ignorado: racha solo vía recordDailyLogin. */
+  @ApiPropertyOptional({ deprecated: true })
   @IsOptional()
   @IsInt()
   @Min(0)
   loginStreakDays?: number;
 
-  @ApiPropertyOptional()
+  /** Ignorado: racha solo vía recordDailyLogin. */
+  @ApiPropertyOptional({ deprecated: true })
   @IsOptional()
   @IsInt()
   @Min(0)
   lastLoginEpochDay?: number;
 
-  @ApiPropertyOptional()
+  /** Ignorado: tiers solo vía recordDailyLogin + ledger. */
+  @ApiPropertyOptional({ deprecated: true })
   @IsOptional()
   @IsInt()
   @Min(0)
   streakBonusTierClaimed?: number;
 
+  /** Si equals epoch day UTC servidor y avanza → +50 coins (ledger DAILY_CHEST). */
   @ApiPropertyOptional()
   @IsOptional()
   @IsInt()

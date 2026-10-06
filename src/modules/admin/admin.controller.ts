@@ -2,10 +2,12 @@ import { Body, Controller, Get, Param, Patch, Put, Query, UseGuards } from '@nes
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ReportStatus, Role } from '@prisma/client';
 import { ApiAuthForbiddenResponses } from '../../common/decorators/api-auth-forbidden.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { AuthPermission } from '../auth/permissions/auth-permission.enum';
+import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { AdminService } from './admin.service';
 import { AdminBarsMenuService } from './admin-bars-menu.service';
 import { AdminSetBarMenuDto } from './dto/admin-set-bar-menu.dto';
@@ -73,8 +75,12 @@ export class AdminController {
   @Patch('reports/:id')
   @RequirePermissions(AuthPermission.MODERATE_CONTENT)
   @ApiOperation({ summary: 'Resolver reporte (requiere moderate_content)' })
-  resolve(@Param('id') id: string, @Body() body: { status: ReportStatus; adminNotes?: string }) {
-    return this.admin.resolveReport(id, body.status, body.adminNotes);
+  resolve(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() body: { status: ReportStatus; adminNotes?: string },
+  ) {
+    return this.admin.resolveReport(id, body.status, body.adminNotes, user.sub);
   }
 
   @Patch('users/:id/role')
