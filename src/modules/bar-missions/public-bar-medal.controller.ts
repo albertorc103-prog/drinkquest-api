@@ -11,7 +11,7 @@ import { BarMissionMedalPublicService } from './bar-mission-medal-public.service
 @ApiTags('bar-medals-public')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.USER, Role.ADMIN)
+@Roles(Role.USER, Role.ADMIN, Role.SUPER_ADMIN)
 @Controller('bars')
 export class PublicBarMedalController {
   constructor(private readonly publicMedals: BarMissionMedalPublicService) {}
@@ -36,7 +36,7 @@ export class PublicBarMedalController {
 @ApiTags('user-bar-medals')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.USER, Role.ADMIN)
+@Roles(Role.USER, Role.ADMIN, Role.SUPER_ADMIN)
 @Controller('users/me/bar-medals')
 export class UserBarMedalsController {
   constructor(private readonly publicMedals: BarMissionMedalPublicService) {}
