@@ -15,8 +15,8 @@ import { AdminBarMissionMedalService } from './admin-bar-mission-medal.service';
 import { BarMissionMedalService } from './bar-mission-medal.service';
 
 describe('BarMissionMedalService FASE 3', () => {
-  const barA = { id: 'bar-a' };
-  const barB = { id: 'bar-b' };
+  const barA = { id: 'bar-a', logoUrl: 'https://cdn.example/feed/owner/logo-a.png' };
+  const barB = { id: 'bar-b', logoUrl: null };
   const seasonA = {
     id: 'season-a',
     barId: 'bar-a',
@@ -50,6 +50,12 @@ describe('BarMissionMedalService FASE 3', () => {
     seasonA.currentMedalVersionId = null;
 
     prisma = {
+      bar: {
+        findUnique: jest.fn(async ({ where }: any) => {
+          if (where.id === barA.id) return { logoUrl: barA.logoUrl };
+          return null;
+        }),
+      },
       barMissionSeason: {
         findFirst: jest.fn(async ({ where }: any) => {
           if (where.id === seasonA.id && where.barId === barA.id) return { ...seasonA };
@@ -185,6 +191,38 @@ describe('BarMissionMedalService FASE 3', () => {
           return { count: data.length };
         }),
       },
+      uploadAsset: {
+        findUnique: jest.fn(async ({ where }: any) => {
+          if (where.id === 'asset-owned') {
+            return {
+              id: 'asset-owned',
+              ownerUserId: 'owner-a',
+              publicUrl: 'https://cdn.example/feed/owner/logo-a.png',
+            };
+          }
+          if (where.id === 'asset-other') {
+            return {
+              id: 'asset-other',
+              ownerUserId: 'owner-other',
+              publicUrl: 'https://cdn.example/feed/other/logo.png',
+            };
+          }
+          return null;
+        }),
+        findFirst: jest.fn(async ({ where }: any) => {
+          if (
+            where.ownerUserId === 'owner-a' &&
+            where.publicUrl === 'https://cdn.example/feed/owner/logo-a.png'
+          ) {
+            return {
+              id: 'asset-owned',
+              ownerUserId: 'owner-a',
+              publicUrl: where.publicUrl,
+            };
+          }
+          return null;
+        }),
+      },
       $transaction: jest.fn(async (arg: any) => {
         if (typeof arg === 'function') return arg(prisma);
         return Promise.all(arg);
@@ -226,6 +264,18 @@ describe('BarMissionMedalService FASE 3', () => {
     admin = new AdminBarMissionMedalService(prisma, service);
   });
 
+  const validDesign = {
+    schemaVersion: 1,
+    shape: 'CIRCLE',
+    style: 'ELEGANT',
+    material: 'GOLD',
+    palette: 'AMBER',
+    identityMode: 'DRINKQUEST_EMBLEM',
+    identityPlacement: 'PRIMARY',
+    emblem: 'COCKTAIL_GLASS',
+    ornaments: ['STARS'],
+  };
+
   const validDto = {
     title: 'Guardian',
     description: 'Has demostrado conocer el local.',
@@ -238,6 +288,7 @@ describe('BarMissionMedalService FASE 3', () => {
         referenceId: 'mission-a',
       },
     ],
+    designConfig: validDesign,
   };
 
   it('TEST 2: plan sin entitlement no puede crear', async () => {

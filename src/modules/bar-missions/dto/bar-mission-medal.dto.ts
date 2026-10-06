@@ -7,6 +7,7 @@ import {
   IsArray,
   IsEnum,
   IsInt,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -61,6 +62,15 @@ export class UpsertBarMedalDto {
   @ValidateNested({ each: true })
   @Type(() => BarMedalConditionInputDto)
   conditions!: BarMedalConditionInputDto[];
+
+  /** designConfig schema v1 (formas/estilo/identidad). Validado en servicio. */
+  @ApiProperty({
+    description: 'Configuración visual schemaVersion=1',
+    type: 'object',
+    additionalProperties: true,
+  })
+  @IsObject()
+  designConfig!: Record<string, unknown>;
 }
 
 export class UpdateBarMedalDto {
@@ -91,6 +101,15 @@ export class UpdateBarMedalDto {
   @ValidateNested({ each: true })
   @Type(() => BarMedalConditionInputDto)
   conditions?: BarMedalConditionInputDto[];
+
+  @ApiPropertyOptional({
+    description: 'Configuración visual schemaVersion=1',
+    type: 'object',
+    additionalProperties: true,
+  })
+  @IsOptional()
+  @IsObject()
+  designConfig?: Record<string, unknown>;
 }
 
 export class AdminBarMedalReviewDto {

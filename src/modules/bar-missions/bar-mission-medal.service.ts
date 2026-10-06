@@ -20,6 +20,13 @@ import {
 } from '../subscriptions/subscription-plan.util';
 import { assertHealthyMissionCopy } from './bar-mission-templates';
 import {
+  BarMedalDesignConfigV1,
+  buildTemplateId,
+  resolveDesignConfigForClient,
+  toPublicDesignConfig,
+  validateDesignConfigInput,
+} from './bar-medal-design-config';
+import {
   UpdateBarMedalDto,
   UpsertBarMedalDto,
 } from './dto/bar-mission-medal.dto';
@@ -95,6 +102,11 @@ export class BarMissionMedalService {
     }
     const conditions = await this.validateConditions(season.id, bar.id, dto.conditions);
     this.validateCopy(dto.title, dto.description);
+    const designConfig = await this.resolveDesignConfigForBar(
+      ownerUserId,
+      bar.id,
+      dto.designConfig,
+    );
 
     const created = await this.prisma.$transaction(async (tx) => {
       const version = await tx.barMissionMedalVersion.create({
@@ -106,6 +118,8 @@ export class BarMissionMedalService {
           status: BarMissionMedalVersionStatus.DRAFT,
           conditionMode: dto.conditionMode ?? BarMissionMedalConditionMode.ALL,
           xpReward: 0,
+          templateId: buildTemplateId(designConfig),
+          designConfig: designConfig as unknown as Prisma.InputJsonValue,
           conditions: { create: this.toConditionCreates(conditions) },
         },
         include: { conditions: { orderBy: { position: 'asc' } } },
@@ -143,6 +157,10 @@ export class BarMissionMedalService {
     const conditions = dto.conditions
       ? await this.validateConditions(season.id, bar.id, dto.conditions)
       : null;
+    const designConfig =
+      dto.designConfig !== undefined
+        ? await this.resolveDesignConfigForBar(ownerUserId, bar.id, dto.designConfig)
+        : null;
 
     const updated = await this.prisma.$transaction(async (tx) => {
       if (conditions) {
@@ -161,7 +179,17 @@ export class BarMissionMedalService {
       }
       const row = await tx.barMissionMedalVersion.update({
         where: { id: version.id },
-        data: { title, description, conditionMode },
+        data: {
+          title,
+          description,
+          conditionMode,
+          ...(designConfig
+            ? {
+                templateId: buildTemplateId(designConfig),
+                designConfig: designConfig as unknown as Prisma.InputJsonValue,
+              }
+            : {}),
+        },
         include: { conditions: { orderBy: { position: 'asc' } } },
       });
       await tx.barMissionSeason.update({
@@ -289,6 +317,8 @@ export class BarMissionMedalService {
         referenceId: c.referenceId ?? undefined,
       })),
     );
+    // Envío a review exige designConfig válido (no fallback legacy).
+    validateDesignConfigInput(version.designConfig, { requireIdentityResolved: true });
 
     const updated = await this.prisma.barMissionMedalVersion.update({
       where: { id: version.id },
@@ -336,6 +366,7 @@ export class BarMissionMedalService {
       position: number;
     }>;
   }) {
+    const resolved = resolveDesignConfigForClient(version.designConfig);
     return {
       id: version.id,
       seasonId: version.seasonId,
@@ -346,7 +377,12 @@ export class BarMissionMedalService {
       conditionMode: version.conditionMode,
       xpReward: version.xpReward,
       templateId: version.templateId,
+      /** Config almacenada (puede ser null en legacy). */
       designConfig: version.designConfig,
+      /** Config normalizada para renderer (fallback legacy si hace falta). */
+      visual: toPublicDesignConfig(resolved.designConfig),
+      designConfigValid: resolved.designConfigValid,
+      isLegacyVisualFallback: resolved.isLegacyFallback,
       reviewComment: version.reviewNote,
       moderatedByAdminId: version.moderatedByAdminId,
       moderatedAt: version.moderatedAt?.toISOString() ?? null,
@@ -364,6 +400,72 @@ export class BarMissionMedalService {
         referenceId: c.referenceId,
         position: c.position,
       })),
+    };
+  }
+
+  /**
+   * Valida designConfig + resuelve snapshot de logo del bar.
+   * Estrategia snapshot: congelar `identityAssetUrl` (URL MinIO/R2 con object key único)
+   * en el JSON de la versión. Si el bar cambia logo después, el histórico no cambia.
+   */
+  private async resolveDesignConfigForBar(
+    ownerUserId: string,
+    barId: string,
+    raw: unknown,
+  ): Promise<BarMedalDesignConfigV1> {
+    const cfg = validateDesignConfigInput(raw);
+
+    if (cfg.identityMode !== 'LOGO') {
+      return {
+        ...cfg,
+        identityAssetId: null,
+        identityAssetUrl: null,
+      };
+    }
+
+    const bar = await this.prisma.bar.findUnique({
+      where: { id: barId },
+      select: { logoUrl: true },
+    });
+    const barLogoUrl = bar?.logoUrl ?? null;
+
+    let identityAssetId = cfg.identityAssetId;
+    let identityAssetUrl = cfg.identityAssetUrl;
+
+    if (identityAssetId) {
+      const asset = await this.prisma.uploadAsset.findUnique({
+        where: { id: identityAssetId },
+      });
+      if (!asset || asset.ownerUserId !== ownerUserId) {
+        throw new BadRequestException('IDENTITY_ASSET_NOT_OWNED');
+      }
+      identityAssetUrl = asset.publicUrl;
+    } else if (identityAssetUrl) {
+      const owned = await this.prisma.uploadAsset.findFirst({
+        where: { ownerUserId, publicUrl: identityAssetUrl },
+      });
+      if (owned) {
+        identityAssetId = owned.id;
+      } else if (barLogoUrl && identityAssetUrl === barLogoUrl) {
+        // URL del branding actual del bar (puede no estar en upload_assets).
+        identityAssetId = null;
+      } else {
+        throw new BadRequestException('IDENTITY_ASSET_NOT_OWNED');
+      }
+    } else if (barLogoUrl) {
+      identityAssetUrl = barLogoUrl;
+      const owned = await this.prisma.uploadAsset.findFirst({
+        where: { ownerUserId, publicUrl: barLogoUrl },
+      });
+      identityAssetId = owned?.id ?? null;
+    } else {
+      throw new BadRequestException('LOGO_IDENTITY_REQUIRED');
+    }
+
+    return {
+      ...cfg,
+      identityAssetId,
+      identityAssetUrl,
     };
   }
 

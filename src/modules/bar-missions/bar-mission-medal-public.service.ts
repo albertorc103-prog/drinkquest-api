@@ -4,8 +4,22 @@ import {
   BarMissionSeasonStatus,
 } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
+import {
+  resolveDesignConfigForClient,
+  toPublicDesignConfig,
+} from './bar-medal-design-config';
 import { BarMissionMedalActiveResolver } from './bar-mission-medal-active.resolver';
 import { BarMissionMedalProgressService } from './bar-mission-medal-progress.service';
+
+function publicVisual(raw: unknown) {
+  const resolved = resolveDesignConfigForClient(raw);
+  return {
+    designConfig: raw ?? null,
+    visual: toPublicDesignConfig(resolved.designConfig),
+    designConfigValid: resolved.designConfigValid,
+    isLegacyVisualFallback: resolved.isLegacyFallback,
+  };
+}
 
 /**
  * APIs de lectura FASE 7: medalla pública, progreso por bar, historial usuario.
@@ -59,7 +73,7 @@ export class BarMissionMedalPublicService {
       xpReward: active.xpReward,
       conditionMode: active.conditionMode,
       templateId: active.templateId,
-      designConfig: active.designConfig,
+      ...publicVisual(active.designConfig),
       conditions: active.conditions.map((c) => ({
         type: c.type,
         target: c.targetValue,
@@ -104,13 +118,17 @@ export class BarMissionMedalPublicService {
     }
 
     let xpReward: number | null = null;
+    let versionDesign: unknown = null;
+    let versionTemplateId: string | null = null;
     const versionId = progress.earnedMedalVersionId ?? progress.medalVersionId;
     if (versionId) {
       const v = await this.prisma.barMissionMedalVersion.findUnique({
         where: { id: versionId },
-        select: { xpReward: true },
+        select: { xpReward: true, designConfig: true, templateId: true },
       });
       xpReward = v?.xpReward ?? null;
+      versionDesign = v?.designConfig ?? null;
+      versionTemplateId = v?.templateId ?? null;
     }
 
     const missionIds = progress.conditions
@@ -137,6 +155,8 @@ export class BarMissionMedalPublicService {
       overallProgress: progress.overallProgress,
       conditionMode: progress.conditionMode,
       eligibleToUnlock: progress.eligibleToUnlock,
+      templateId: versionTemplateId,
+      ...publicVisual(versionDesign),
       conditions: progress.conditions.map((c) => ({
         type: c.type,
         current: c.current,
@@ -199,7 +219,7 @@ export class BarMissionMedalPublicService {
           barName: m.bar.businessName,
           barLogoUrl: m.bar.logoUrl,
           templateId: m.medalVersion?.templateId ?? null,
-          designConfig: m.medalVersion?.designConfig ?? null,
+          ...publicVisual(m.medalVersion?.designConfig ?? null),
           xpReward: m.medalVersion?.xpReward ?? 0,
           unlockedAt: m.unlockedAt.toISOString(),
           seasonId: m.season.id,
@@ -274,7 +294,7 @@ export class BarMissionMedalPublicService {
       xpReward: medal.medalVersion?.xpReward ?? 0,
       conditionMode: medal.medalVersion?.conditionMode ?? null,
       templateId: medal.medalVersion?.templateId ?? null,
-      designConfig: medal.medalVersion?.designConfig ?? null,
+      ...publicVisual(medal.medalVersion?.designConfig ?? null),
       conditions: rawConditions.map((c) => ({
         id: c.id,
         type: c.type,

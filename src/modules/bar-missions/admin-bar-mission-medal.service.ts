@@ -10,6 +10,7 @@ import {
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
+import { resolveDesignConfigForClient } from './bar-medal-design-config';
 import { BarMissionMedalService } from './bar-mission-medal.service';
 
 const XP_MAX = 500;
@@ -181,6 +182,10 @@ export class AdminBarMissionMedalService {
       )
     ) {
       throw new BadRequestException('UNSUPPORTED_CONDITION');
+    }
+    const { designConfigValid } = resolveDesignConfigForClient(version.designConfig);
+    if (!designConfigValid) {
+      throw new BadRequestException('INVALID_DESIGN_CONFIG');
     }
     const updated = await this.prisma.barMissionMedalVersion.update({
       where: { id: version.id },
