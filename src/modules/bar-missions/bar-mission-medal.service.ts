@@ -21,6 +21,8 @@ import {
 import { assertHealthyMissionCopy } from './bar-mission-templates';
 import {
   BarMedalDesignConfigV1,
+  BAR_MEDAL_TEMPLATE_V1,
+  LEGACY_BAR_MEDAL_DESIGN,
   buildTemplateId,
   resolveDesignConfigForClient,
   toPublicDesignConfig,
@@ -74,7 +76,41 @@ export class BarMissionMedalService {
     if (!version) {
       return { seasonId: season.id, version: null };
     }
-    return { seasonId: season.id, version: this.mapVersion(version) };
+    // Auto-heal: medallas creadas antes del Visual System V1 (designConfig null).
+    const healed = await this.healLegacyNullDesignConfig(version);
+    return { seasonId: season.id, version: this.mapVersion(healed) };
+  }
+
+  /**
+   * Persiste LEGACY_BAR_MEDAL_DESIGN cuando designConfig está ausente.
+   * Evita dejar versiones "válidas de negocio" con designConfigValid=false.
+   */
+  private async healLegacyNullDesignConfig<
+    T extends {
+      id: string;
+      designConfig: Prisma.JsonValue | null;
+      templateId: string | null;
+      conditions: Array<{
+        id: string;
+        type: BarMissionMedalConditionType;
+        targetValue: number | null;
+        referenceId: string | null;
+        position: number;
+      }>;
+    },
+  >(version: T): Promise<T> {
+    if (version.designConfig != null) return version;
+    const updated = await this.prisma.barMissionMedalVersion.update({
+      where: { id: version.id },
+      data: {
+        designConfig: {
+          ...LEGACY_BAR_MEDAL_DESIGN,
+        } as unknown as Prisma.InputJsonValue,
+        templateId: version.templateId ?? buildTemplateId(LEGACY_BAR_MEDAL_DESIGN),
+      },
+      include: { conditions: { orderBy: { position: 'asc' } } },
+    });
+    return updated as unknown as T;
   }
 
   async listVersions(ownerUserId: string, seasonId: string) {
@@ -250,6 +286,16 @@ export class BarMissionMedalService {
             _max: { version: true },
           });
           const nextVersion = (agg._max.version ?? 0) + 1;
+          // Medallas legacy (designConfig null) no deben clonar null:
+          // sembrar LEGACY_BAR_MEDAL_DESIGN para que el borrador sea válido.
+          const seededDesign =
+            source.designConfig == null
+              ? ({ ...LEGACY_BAR_MEDAL_DESIGN } as unknown as Prisma.InputJsonValue)
+              : (source.designConfig as Prisma.InputJsonValue);
+          const seededTemplateId =
+            source.designConfig == null
+              ? buildTemplateId(LEGACY_BAR_MEDAL_DESIGN)
+              : (source.templateId ?? BAR_MEDAL_TEMPLATE_V1);
           const version = await tx.barMissionMedalVersion.create({
             data: {
               seasonId: season.id,
@@ -259,8 +305,8 @@ export class BarMissionMedalService {
               status: BarMissionMedalVersionStatus.DRAFT,
               conditionMode: source.conditionMode,
               xpReward: source.xpReward,
-              templateId: source.templateId,
-              designConfig: source.designConfig ?? Prisma.JsonNull,
+              templateId: seededTemplateId,
+              designConfig: seededDesign,
               conditions: {
                 create: source.conditions.map((c, i) => ({
                   type: c.type,
