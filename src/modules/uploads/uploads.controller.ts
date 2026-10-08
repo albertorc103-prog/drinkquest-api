@@ -22,7 +22,7 @@ import { PrismaService } from '../../database/prisma.service';
 import { StorageService } from './storage.service';
 import { detectUploadContent, UPLOAD_SIZE_LIMITS } from './upload-mime.util';
 
-const UPLOAD_FOLDERS = ['avatars', 'chat', 'feed', 'drinks', 'promotions'] as const;
+const UPLOAD_FOLDERS = ['avatars', 'chat', 'feed', 'drinks', 'promotions', 'medals'] as const;
 type UploadFolder = (typeof UPLOAD_FOLDERS)[number];
 
 function assertUploadFolder(folder: string): UploadFolder {
@@ -99,7 +99,7 @@ export class UploadsController {
       user.sub,
     );
 
-    await this.prisma.uploadAsset.create({
+    const asset = await this.prisma.uploadAsset.create({
       data: {
         ownerUserId: user.sub,
         folder,
@@ -121,7 +121,7 @@ export class UploadsController {
         status: 'ok',
       }),
     );
-    return { key: result.key, publicUrl: result.publicUrl };
+    return { id: asset.id, key: result.key, publicUrl: result.publicUrl };
   }
 
   @Delete(':uploadId')

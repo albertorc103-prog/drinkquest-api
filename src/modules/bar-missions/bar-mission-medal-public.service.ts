@@ -4,21 +4,20 @@ import {
   BarMissionSeasonStatus,
 } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
-import {
-  resolveDesignConfigForClient,
-  toPublicDesignConfig,
-} from './bar-medal-design-config';
+import { mapMedalVisualFields } from './bar-medal-visual.util';
 import { BarMissionMedalActiveResolver } from './bar-mission-medal-active.resolver';
 import { BarMissionMedalProgressService } from './bar-mission-medal-progress.service';
 
-function publicVisual(raw: unknown) {
-  const resolved = resolveDesignConfigForClient(raw);
-  return {
-    designConfig: raw ?? null,
-    visual: toPublicDesignConfig(resolved.designConfig),
-    designConfigValid: resolved.designConfigValid,
-    isLegacyVisualFallback: resolved.isLegacyFallback,
-  };
+function publicVisual(version: {
+  designConfig?: unknown;
+  visualMode?: import('@prisma/client').BarMedalVisualMode | null;
+  artworkUrl?: string | null;
+} | null) {
+  return mapMedalVisualFields({
+    designConfig: version?.designConfig ?? null,
+    visualMode: version?.visualMode,
+    artworkUrl: version?.artworkUrl,
+  });
 }
 
 /**
@@ -73,7 +72,7 @@ export class BarMissionMedalPublicService {
       xpReward: active.xpReward,
       conditionMode: active.conditionMode,
       templateId: active.templateId,
-      ...publicVisual(active.designConfig),
+      ...publicVisual(active),
       conditions: active.conditions.map((c) => ({
         type: c.type,
         target: c.targetValue,
@@ -118,17 +117,26 @@ export class BarMissionMedalPublicService {
     }
 
     let xpReward: number | null = null;
-    let versionDesign: unknown = null;
-    let versionTemplateId: string | null = null;
+    let versionRow: {
+      xpReward: number;
+      designConfig: unknown;
+      templateId: string | null;
+      visualMode: import('@prisma/client').BarMedalVisualMode;
+      artworkUrl: string | null;
+    } | null = null;
     const versionId = progress.earnedMedalVersionId ?? progress.medalVersionId;
     if (versionId) {
-      const v = await this.prisma.barMissionMedalVersion.findUnique({
+      versionRow = await this.prisma.barMissionMedalVersion.findUnique({
         where: { id: versionId },
-        select: { xpReward: true, designConfig: true, templateId: true },
+        select: {
+          xpReward: true,
+          designConfig: true,
+          templateId: true,
+          visualMode: true,
+          artworkUrl: true,
+        },
       });
-      xpReward = v?.xpReward ?? null;
-      versionDesign = v?.designConfig ?? null;
-      versionTemplateId = v?.templateId ?? null;
+      xpReward = versionRow?.xpReward ?? null;
     }
 
     const missionIds = progress.conditions
@@ -155,8 +163,8 @@ export class BarMissionMedalPublicService {
       overallProgress: progress.overallProgress,
       conditionMode: progress.conditionMode,
       eligibleToUnlock: progress.eligibleToUnlock,
-      templateId: versionTemplateId,
-      ...publicVisual(versionDesign),
+      templateId: versionRow?.templateId ?? null,
+      ...publicVisual(versionRow),
       conditions: progress.conditions.map((c) => ({
         type: c.type,
         current: c.current,
@@ -195,6 +203,8 @@ export class BarMissionMedalPublicService {
               xpReward: true,
               templateId: true,
               designConfig: true,
+              visualMode: true,
+              artworkUrl: true,
             },
           },
         },
@@ -219,7 +229,7 @@ export class BarMissionMedalPublicService {
           barName: m.bar.businessName,
           barLogoUrl: m.bar.logoUrl,
           templateId: m.medalVersion?.templateId ?? null,
-          ...publicVisual(m.medalVersion?.designConfig ?? null),
+          ...publicVisual(m.medalVersion),
           xpReward: m.medalVersion?.xpReward ?? 0,
           unlockedAt: m.unlockedAt.toISOString(),
           seasonId: m.season.id,
@@ -294,7 +304,7 @@ export class BarMissionMedalPublicService {
       xpReward: medal.medalVersion?.xpReward ?? 0,
       conditionMode: medal.medalVersion?.conditionMode ?? null,
       templateId: medal.medalVersion?.templateId ?? null,
-      ...publicVisual(medal.medalVersion?.designConfig ?? null),
+      ...publicVisual(medal.medalVersion),
       conditions: rawConditions.map((c) => ({
         id: c.id,
         type: c.type,

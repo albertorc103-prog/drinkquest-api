@@ -259,6 +259,12 @@ enum BarMissionMedalConditionMode {
   ANY
 }
 
+/// Representación visual de la medalla (temporal: artwork admin vs builder).
+enum BarMedalVisualMode {
+  ADMIN_ARTWORK
+  BUILDER_V1
+}
+
 /**
  * Tipos de condición de medalla de local.
  * EVENT_PARTICIPATION está reservado; no aceptar creación en API hasta haber participación verificable.
@@ -898,6 +904,12 @@ model BarMissionMedalVersion {
   xpReward           Int                          @default(0) @map("xp_reward")
   templateId         String?                      @map("template_id")
   designConfig       Json?                        @map("design_config")
+  /// ADMIN_ARTWORK = imagen subida por admin; BUILDER_V1 = designConfig renderer.
+  visualMode         BarMedalVisualMode           @default(ADMIN_ARTWORK) @map("visual_mode")
+  /// UploadAsset.id del artwork (ownership admin). Snapshot por versión.
+  artworkAssetId     String?                      @map("artwork_asset_id") @db.Uuid
+  /// URL pública congelada del artwork (no leer logo mutable del bar).
+  artworkUrl         String?                      @map("artwork_url")
   /// Comentario admin (request-changes / reject). Alias API: reviewComment.
   reviewNote         String?                      @map("review_note")
   moderatedByAdminId String?                      @map("moderated_by_admin_id") @db.Uuid

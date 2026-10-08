@@ -19,6 +19,7 @@ import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { AuthPermission } from '../auth/permissions/auth-permission.enum';
 import { AdminBarMissionMedalService } from './admin-bar-mission-medal.service';
 import {
+  AdminBarMedalArtworkDto,
   AdminBarMedalReviewDto,
   AdminBarMedalRewardDto,
 } from './dto/bar-mission-medal.dto';
@@ -113,5 +114,18 @@ export class AdminBarMissionMedalController {
   @ApiOperation({ summary: 'Definir xpReward (0–500; no ACTIVE)' })
   reward(@Param('versionId') versionId: string, @Body() body: AdminBarMedalRewardDto) {
     return this.moderation.setReward(versionId, body.xpReward);
+  }
+
+  @Patch(':versionId/artwork')
+  @RequirePermissions(AuthPermission.MODERATE_CONTENT)
+  @ApiOperation({
+    summary: 'Asignar artwork administrativo a la versión (snapshot; no ACTIVE)',
+  })
+  setArtwork(
+    @CurrentUser() admin: JwtPayload,
+    @Param('versionId') versionId: string,
+    @Body() body: AdminBarMedalArtworkDto,
+  ) {
+    return this.moderation.setArtwork(versionId, admin.sub, body);
   }
 }

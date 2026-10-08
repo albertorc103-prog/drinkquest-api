@@ -5,15 +5,24 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  BarMedalVisualMode,
   BarMissionMedalConditionType,
   BarMissionMedalVersionStatus,
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { resolveDesignConfigForClient } from './bar-medal-design-config';
+import { assertArtworkReadyForPublish } from './bar-medal-visual.util';
 import { BarMissionMedalService } from './bar-mission-medal.service';
 
 const XP_MAX = 500;
+
+const ARTWORK_EDITABLE: BarMissionMedalVersionStatus[] = [
+  BarMissionMedalVersionStatus.DRAFT,
+  BarMissionMedalVersionStatus.CHANGES_REQUESTED,
+  BarMissionMedalVersionStatus.PENDING_REVIEW,
+  BarMissionMedalVersionStatus.APPROVED,
+];
 
 @Injectable()
 export class AdminBarMissionMedalService {
@@ -183,9 +192,14 @@ export class AdminBarMissionMedalService {
     ) {
       throw new BadRequestException('UNSUPPORTED_CONDITION');
     }
-    const { designConfigValid } = resolveDesignConfigForClient(version.designConfig);
-    if (!designConfigValid) {
-      throw new BadRequestException('INVALID_DESIGN_CONFIG');
+    const mode = version.visualMode ?? BarMedalVisualMode.BUILDER_V1;
+    if (mode === BarMedalVisualMode.ADMIN_ARTWORK) {
+      assertArtworkReadyForPublish(version);
+    } else {
+      const { designConfigValid } = resolveDesignConfigForClient(version.designConfig);
+      if (!designConfigValid) {
+        throw new BadRequestException('INVALID_DESIGN_CONFIG');
+      }
     }
     const updated = await this.prisma.barMissionMedalVersion.update({
       where: { id: version.id },
@@ -195,6 +209,67 @@ export class AdminBarMissionMedalService {
         moderatedByAdminId: adminId,
         moderatedAt: new Date(),
         reviewNote: null,
+      },
+      include: { conditions: { orderBy: { position: 'asc' } } },
+    });
+    return this.medals.mapVersion(updated);
+  }
+
+  /**
+   * Asigna artwork administrativo a una versión editable.
+   * Congela URL + assetId en la versión (snapshot). ACTIVE no es mutable.
+   */
+  async setArtwork(
+    versionId: string,
+    adminId: string,
+    body: { artworkAssetId?: string; artworkUrl?: string },
+  ) {
+    const version = await this.prisma.barMissionMedalVersion.findUnique({
+      where: { id: versionId },
+      include: { conditions: { orderBy: { position: 'asc' } } },
+    });
+    if (!version) throw new NotFoundException('MEDAL_VERSION_NOT_FOUND');
+    if (!ARTWORK_EDITABLE.includes(version.status)) {
+      throw new BadRequestException('MEDAL_ARTWORK_NOT_EDITABLE');
+    }
+
+    let artworkAssetId: string | null = null;
+    let artworkUrl: string | null = null;
+
+    if (body.artworkAssetId) {
+      const asset = await this.prisma.uploadAsset.findUnique({
+        where: { id: body.artworkAssetId },
+      });
+      if (!asset || asset.ownerUserId !== adminId) {
+        throw new BadRequestException('ARTWORK_ASSET_NOT_OWNED');
+      }
+      if (asset.folder !== 'medals' && asset.folder !== 'promotions') {
+        throw new BadRequestException('ARTWORK_FOLDER_INVALID');
+      }
+      artworkAssetId = asset.id;
+      artworkUrl = asset.publicUrl;
+    } else if (body.artworkUrl?.trim()) {
+      const url = body.artworkUrl.trim();
+      const asset = await this.prisma.uploadAsset.findFirst({
+        where: { ownerUserId: adminId, publicUrl: url },
+      });
+      if (!asset) {
+        throw new BadRequestException('ARTWORK_ASSET_NOT_OWNED');
+      }
+      artworkAssetId = asset.id;
+      artworkUrl = asset.publicUrl;
+    } else {
+      throw new BadRequestException('ARTWORK_REQUIRED');
+    }
+
+    const updated = await this.prisma.barMissionMedalVersion.update({
+      where: { id: version.id },
+      data: {
+        visualMode: BarMedalVisualMode.ADMIN_ARTWORK,
+        artworkAssetId,
+        artworkUrl,
+        moderatedByAdminId: adminId,
+        moderatedAt: new Date(),
       },
       include: { conditions: { orderBy: { position: 'asc' } } },
     });
@@ -289,6 +364,7 @@ export class AdminBarMissionMedalService {
     if (version.status !== BarMissionMedalVersionStatus.APPROVED) {
       throw new BadRequestException('INVALID_STATUS_TRANSITION');
     }
+    assertArtworkReadyForPublish(version);
 
     try {
       const updated = await this.prisma.$transaction(async (tx) => {

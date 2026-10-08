@@ -63,14 +63,15 @@ export class UpsertBarMedalDto {
   @Type(() => BarMedalConditionInputDto)
   conditions!: BarMedalConditionInputDto[];
 
-  /** designConfig schema v1 (formas/estilo/identidad). Validado en servicio. */
-  @ApiProperty({
-    description: 'Configuración visual schemaVersion=1',
+  /** designConfig schema v1 (opcional en modo ADMIN_ARTWORK temporal). */
+  @ApiPropertyOptional({
+    description: 'Configuración visual schemaVersion=1 (BUILDER_V1). Opcional si visualMode=ADMIN_ARTWORK.',
     type: 'object',
     additionalProperties: true,
   })
+  @IsOptional()
   @IsObject()
-  designConfig!: Record<string, unknown>;
+  designConfig?: Record<string, unknown>;
 }
 
 export class UpdateBarMedalDto {
@@ -127,4 +128,18 @@ export class AdminBarMedalRewardDto {
   @Min(0)
   @Max(500)
   xpReward!: number;
+}
+
+export class AdminBarMedalArtworkDto {
+  @ApiPropertyOptional({ description: 'UploadAsset.id (preferido)' })
+  @IsOptional()
+  @IsUUID()
+  artworkAssetId?: string;
+
+  @ApiPropertyOptional({ description: 'URL pública del upload (alternativa)' })
+  @IsOptional()
+  @IsString()
+  @MinLength(8)
+  @MaxLength(2048)
+  artworkUrl?: string;
 }

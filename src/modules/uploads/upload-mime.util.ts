@@ -134,4 +134,5 @@ export const UPLOAD_SIZE_LIMITS: Record<string, number> = {
   chat: 8 * 1024 * 1024,
   drinks: 5 * 1024 * 1024,
   promotions: 5 * 1024 * 1024,
+  medals: 5 * 1024 * 1024,
 };

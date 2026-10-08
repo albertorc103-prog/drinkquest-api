@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  BarMedalVisualMode,
   BarMissionMedalConditionMode,
   BarMissionMedalConditionType,
   BarMissionMedalVersionStatus,
@@ -24,10 +25,9 @@ import {
   BAR_MEDAL_TEMPLATE_V1,
   LEGACY_BAR_MEDAL_DESIGN,
   buildTemplateId,
-  resolveDesignConfigForClient,
-  toPublicDesignConfig,
   validateDesignConfigInput,
 } from './bar-medal-design-config';
+import { mapMedalVisualFields } from './bar-medal-visual.util';
 import {
   UpdateBarMedalDto,
   UpsertBarMedalDto,
@@ -141,7 +141,7 @@ export class BarMissionMedalService {
     const designConfig = await this.resolveDesignConfigForBar(
       ownerUserId,
       bar.id,
-      dto.designConfig,
+      dto.designConfig ?? LEGACY_BAR_MEDAL_DESIGN,
     );
 
     const created = await this.prisma.$transaction(async (tx) => {
@@ -156,6 +156,9 @@ export class BarMissionMedalService {
           xpReward: 0,
           templateId: buildTemplateId(designConfig),
           designConfig: designConfig as unknown as Prisma.InputJsonValue,
+          visualMode: BarMedalVisualMode.ADMIN_ARTWORK,
+          artworkAssetId: null,
+          artworkUrl: null,
           conditions: { create: this.toConditionCreates(conditions) },
         },
         include: { conditions: { orderBy: { position: 'asc' } } },
@@ -307,6 +310,10 @@ export class BarMissionMedalService {
               xpReward: source.xpReward,
               templateId: seededTemplateId,
               designConfig: seededDesign,
+              // Congela snapshot de artwork de la versión fuente; ADMIN puede reemplazar en DRAFT.
+              visualMode: source.visualMode ?? BarMedalVisualMode.ADMIN_ARTWORK,
+              artworkAssetId: source.artworkAssetId ?? null,
+              artworkUrl: source.artworkUrl ?? null,
               conditions: {
                 create: source.conditions.map((c, i) => ({
                   type: c.type,
@@ -363,8 +370,10 @@ export class BarMissionMedalService {
         referenceId: c.referenceId ?? undefined,
       })),
     );
-    // Envío a review exige designConfig válido (no fallback legacy).
-    validateDesignConfigInput(version.designConfig, { requireIdentityResolved: true });
+    // BUILDER_V1: designConfig válido. ADMIN_ARTWORK: artwork opcional en submit (requerido al aprobar).
+    if ((version.visualMode ?? BarMedalVisualMode.BUILDER_V1) === BarMedalVisualMode.BUILDER_V1) {
+      validateDesignConfigInput(version.designConfig, { requireIdentityResolved: true });
+    }
 
     const updated = await this.prisma.barMissionMedalVersion.update({
       where: { id: version.id },
@@ -394,6 +403,9 @@ export class BarMissionMedalService {
     xpReward: number;
     templateId: string | null;
     designConfig: Prisma.JsonValue | null;
+    visualMode?: BarMedalVisualMode | null;
+    artworkAssetId?: string | null;
+    artworkUrl?: string | null;
     reviewNote: string | null;
     moderatedByAdminId: string | null;
     moderatedAt: Date | null;
@@ -412,7 +424,7 @@ export class BarMissionMedalService {
       position: number;
     }>;
   }) {
-    const resolved = resolveDesignConfigForClient(version.designConfig);
+    const visualFields = mapMedalVisualFields(version);
     return {
       id: version.id,
       seasonId: version.seasonId,
@@ -423,12 +435,7 @@ export class BarMissionMedalService {
       conditionMode: version.conditionMode,
       xpReward: version.xpReward,
       templateId: version.templateId,
-      /** Config almacenada (puede ser null en legacy). */
-      designConfig: version.designConfig,
-      /** Config normalizada para renderer (fallback legacy si hace falta). */
-      visual: toPublicDesignConfig(resolved.designConfig),
-      designConfigValid: resolved.designConfigValid,
-      isLegacyVisualFallback: resolved.isLegacyFallback,
+      ...visualFields,
       reviewComment: version.reviewNote,
       moderatedByAdminId: version.moderatedByAdminId,
       moderatedAt: version.moderatedAt?.toISOString() ?? null,
