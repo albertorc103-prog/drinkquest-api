@@ -1,5 +1,5 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsEmail, IsEnum, IsString, MinLength } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsEmail, IsEnum, IsOptional, IsString, MinLength } from 'class-validator';
 import { AuthLoginIntent } from '../enums/auth-login-intent.enum';
 
 export class LoginDto {
@@ -12,11 +12,18 @@ export class LoginDto {
   @MinLength(8)
   password!: string;
 
-  @ApiProperty({
+  /**
+   * Opcional (app unificada). Si se omite, el servidor autentica y
+   * emite tokens con el rol real sin validar intent vs UI.
+   * Si se envía (clientes antiguos / Swagger), se mantiene la validación.
+   */
+  @ApiPropertyOptional({
     enum: AuthLoginIntent,
-    description: 'USER = acceso cliente; BAR = panel de negocio',
+    description:
+      'Opcional. USER/BAR solo para clientes legacy. Sin intent = login unificado por rol real.',
     example: AuthLoginIntent.USER,
   })
+  @IsOptional()
   @IsEnum(AuthLoginIntent)
-  intent!: AuthLoginIntent;
+  intent?: AuthLoginIntent;
 }

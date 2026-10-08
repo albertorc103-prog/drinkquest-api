@@ -10,7 +10,9 @@ export function isAdminLoginRole(role: Role): boolean {
 }
 
 /**
- * Valida intent vs rol. ADMIN/SUPER_ADMIN pasan en ambos intents para Swagger y app Android.
+ * Valida intent vs rol (solo cuando el cliente envía intent).
+ * ADMIN/SUPER_ADMIN pasan en ambos intents para Swagger y clientes legacy.
+ * Login unificado (sin intent) no llama a esta función.
  */
 export function validateLoginIntent(
   role: Role,
@@ -23,7 +25,7 @@ export function validateLoginIntent(
     if (role !== Role.USER && !isAdmin) {
       if (role === Role.BAR) {
         throw new ForbiddenException(
-          'Esta cuenta es de un negocio. Usa el acceso «Negocio» para entrar.',
+          'Esta cuenta es de establecimiento. Inicia sesión de nuevo para continuar.',
         );
       }
       throw new ForbiddenException(
@@ -36,7 +38,7 @@ export function validateLoginIntent(
   if (role !== Role.BAR && !isAdmin) {
     if (role === Role.USER) {
       throw new ForbiddenException(
-        'Esta cuenta es de cliente. Usa el acceso «Cliente» para entrar.',
+        'Esta cuenta es de cliente. Inicia sesión de nuevo para continuar.',
       );
     }
     throw new ForbiddenException(

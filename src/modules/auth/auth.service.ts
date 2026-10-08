@@ -169,7 +169,11 @@ export class AuthService {
     await this.subscriptions.createTrialSubscription(bar.id, tx);
   }
 
-  async login(email: string, password: string, intent: AuthLoginIntent): Promise<AuthSessionResponseDto> {
+  async login(
+    email: string,
+    password: string,
+    intent?: AuthLoginIntent,
+  ): Promise<AuthSessionResponseDto> {
     const normalized = email.trim().toLowerCase();
     const user = await this.prisma.user.findFirst({
       where: { email: normalized, deletedAt: null },
@@ -183,20 +187,24 @@ export class AuthService {
       );
       throw new UnauthorizedException('Credenciales incorrectas');
     }
-    const bar =
-      intent === AuthLoginIntent.BAR
-        ? await this.prisma.bar.findFirst({
-            where: { ownerUserId: user.id, deletedAt: null },
-            select: { id: true },
-          })
-        : null;
-    this.assertLoginIntent(user.role, bar, intent);
+    // Login unificado (sin intent): rol real del backend, sin selector Android.
+    // Con intent (legacy/Swagger): se mantiene la validación existente.
+    if (intent != null) {
+      const bar =
+        intent === AuthLoginIntent.BAR
+          ? await this.prisma.bar.findFirst({
+              where: { ownerUserId: user.id, deletedAt: null },
+              select: { id: true },
+            })
+          : null;
+      this.assertLoginIntent(user.role, bar, intent);
+    }
     this.logger.log(
       JSON.stringify({
         event: 'auth_login_success',
         userIdHash: user.id.slice(0, 8),
         role: user.role,
-        intent,
+        intent: intent ?? null,
       }),
     );
     return this.issueTokensForUser(user.id, user.email, user.role);

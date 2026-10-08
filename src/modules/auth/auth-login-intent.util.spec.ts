@@ -51,4 +51,14 @@ describe('validateLoginIntent', () => {
       ForbiddenException,
     );
   });
+
+  it('legacy intent messages no longer mention UI selectors Cliente/Negocio', () => {
+    try {
+      validateLoginIntent(Role.BAR, AuthLoginIntent.USER, true);
+      fail('expected ForbiddenException');
+    } catch (e) {
+      const msg = (e as Error).message;
+      expect(msg).not.toMatch(/acceso «Cliente»|acceso «Negocio»|modo Cliente|modo Negocio/i);
+    }
+  });
 });
