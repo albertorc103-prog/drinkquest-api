@@ -9,9 +9,22 @@ describe('ChatService authorization', () => {
   };
   const notifications = { create: jest.fn() };
   const realtime = { emitToRoom: jest.fn(), emitToUser: jest.fn() };
+  const presence = {
+    areOnline: jest.fn(async (ids: string[]) => {
+      const map = new Map<string, boolean>();
+      for (const id of ids) map.set(id, false);
+      return map;
+    }),
+  };
 
   function service(prisma: any) {
-    return new ChatService(prisma, friends as any, notifications as any, realtime as any);
+    return new ChatService(
+      prisma,
+      friends as any,
+      notifications as any,
+      realtime as any,
+      presence as any,
+    );
   }
 
   it('TEST 35/36: no participante → Forbidden', async () => {

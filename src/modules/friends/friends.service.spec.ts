@@ -61,41 +61,45 @@ describe('FriendsService authorization', () => {
     create: jest.fn(async () => ({ id: 'n1' })),
   };
   const realtime = { emitToUser: jest.fn() };
+  const presence = {
+    areOnline: jest.fn(async (ids: string[]) => {
+      const map = new Map<string, boolean>();
+      for (const id of ids) map.set(id, false);
+      return map;
+    }),
+  };
 
-  it('TEST 8: solicitud a sí mismo → FAIL', async () => {
-    const service = new FriendsService(
-      makePrisma({}) as any,
+  function makeService(prisma: any) {
+    return new FriendsService(
+      prisma,
       notifications as any,
       realtime as any,
+      presence as any,
     );
+  }
+
+  it('TEST 8: solicitud a sí mismo → FAIL', async () => {
+    const service = makeService(makePrisma({}) as any);
     await expect(service.sendRequest('u1', 'u1')).rejects.toBeInstanceOf(
       BadRequestException,
     );
   });
 
   it('TEST 10: ya amigos → respuesta estable alreadyFriends', async () => {
-    const service = new FriendsService(
-      makePrisma({ friendship: { id: 'f1' } }) as any,
-      notifications as any,
-      realtime as any,
-    );
+    const service = makeService(makePrisma({ friendship: { id: 'f1' } }) as any);
     const res = await service.sendRequest('u1', 'u2');
     expect((res as any).alreadyFriends).toBe(true);
   });
 
   it('TEST 13/14: bloqueados no pueden enviar solicitud', async () => {
-    const service = new FriendsService(
-      makePrisma({ block: { id: 'b1' } }) as any,
-      notifications as any,
-      realtime as any,
-    );
+    const service = makeService(makePrisma({ block: { id: 'b1' } }) as any);
     await expect(service.sendRequest('u1', 'u2')).rejects.toBeInstanceOf(
       ForbiddenException,
     );
   });
 
   it('TEST 4: aceptar request ajena → FAIL', async () => {
-    const service = new FriendsService(
+    const service = makeService(
       makePrisma({
         friendRequest: {
           id: 'req-1',
@@ -104,8 +108,6 @@ describe('FriendsService authorization', () => {
           status: FriendRequestStatus.PENDING,
         },
       }) as any,
-      notifications as any,
-      realtime as any,
     );
     await expect(service.respond('c', 'req-1', true)).rejects.toBeInstanceOf(
       ForbiddenException,
@@ -113,7 +115,7 @@ describe('FriendsService authorization', () => {
   });
 
   it('TEST 5: cancelar request ajena → FAIL', async () => {
-    const service = new FriendsService(
+    const service = makeService(
       makePrisma({
         friendRequest: {
           id: 'req-1',
@@ -122,8 +124,6 @@ describe('FriendsService authorization', () => {
           status: FriendRequestStatus.PENDING,
         },
       }) as any,
-      notifications as any,
-      realtime as any,
     );
     await expect(service.cancelRequest('c', 'req-1')).rejects.toBeInstanceOf(
       ForbiddenException,
@@ -131,12 +131,7 @@ describe('FriendsService authorization', () => {
   });
 
   it('TEST 16: solo initiator puede unblock', async () => {
-    const prisma = makePrisma({ block: null });
-    const service = new FriendsService(
-      prisma as any,
-      notifications as any,
-      realtime as any,
-    );
+    const service = makeService(makePrisma({ block: null }) as any);
     await expect(service.unblock('a', 'b')).rejects.toBeInstanceOf(
       BadRequestException,
     );

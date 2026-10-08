@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
 import { FriendRequestStatus, NotificationType } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
+import { PresenceService } from '../../common/realtime/presence.service';
 import { RealtimeHub } from '../../common/realtime/realtime-hub.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { levelFromTotalXp } from '../../common/utils/level-from-xp.util';
@@ -11,6 +12,7 @@ export class FriendsService {
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
     private readonly realtime: RealtimeHub,
+    private readonly presence: PresenceService,
   ) {}
 
   /** Bloqueo bidireccional (A↔B). */
@@ -265,13 +267,14 @@ export class FriendsService {
       // No bloquear el listado de amigos si falla el conteo de bebidas.
     }
 
+    const onlineMap = await this.presence.areOnline(uniquePeers.map((p) => p.id));
     return uniquePeers.map((p) => {
       const totalXp = p.totalXp ?? 0;
       return {
         id: p.id,
         displayName: p.displayName,
         avatarUrl: p.avatarUrl,
-        isOnline: p.isOnline,
+        isOnline: onlineMap.get(p.id) ?? false,
         lastSeenAt: p.lastSeenAt?.toISOString() ?? null,
         level: levelFromTotalXp(totalXp),
         totalXp,

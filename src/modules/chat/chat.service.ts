@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { ChatRoomType, NotificationType } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
+import { PresenceService } from '../../common/realtime/presence.service';
 import { RealtimeHub } from '../../common/realtime/realtime-hub.service';
 import { levelFromTotalXp } from '../../common/utils/level-from-xp.util';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -60,6 +61,7 @@ export class ChatService {
     private readonly friends: FriendsService,
     private readonly notifications: NotificationsService,
     private readonly realtime: RealtimeHub,
+    private readonly presence: PresenceService,
   ) {}
 
   async assertParticipant(roomId: string, userId: string) {
@@ -585,6 +587,15 @@ export class ChatService {
       orderBy: { room: { updatedAt: 'desc' } },
     });
 
+    const peerIds = participations
+      .filter((p) => p.room.type !== ChatRoomType.GROUP)
+      .map(
+        (p) =>
+          p.room.participants.find((x) => x.userId !== userId)?.user.id ?? '',
+      )
+      .filter(Boolean);
+    const onlineMap = await this.presence.areOnline(peerIds);
+
     return Promise.all(
       participations.map(async (p) => {
         const last = p.room.messages[0] ?? null;
@@ -592,7 +603,22 @@ export class ChatService {
         const lastReadByPeer = last
           ? last.reads.some((r) => r.userId !== userId)
           : false;
-        return this.mapRoomSummary(p.room, userId, last, unreadCount, lastReadByPeer);
+        const summary = this.mapRoomSummary(
+          p.room,
+          userId,
+          last,
+          unreadCount,
+          lastReadByPeer,
+        );
+        if (summary.peer) {
+          const online = onlineMap.get(summary.peer.id) ?? false;
+          return {
+            ...summary,
+            peer: { ...summary.peer, isOnline: online },
+            isOnline: online,
+          };
+        }
+        return summary;
       }),
     );
   }
