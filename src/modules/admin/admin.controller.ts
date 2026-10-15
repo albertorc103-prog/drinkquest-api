@@ -23,6 +23,13 @@ export class AdminController {
     private readonly adminBarsMenu: AdminBarsMenuService,
   ) {}
 
+  @Get('analytics/growth')
+  @RequirePermissions(AuthPermission.VIEW_ANALYTICS)
+  @ApiOperation({ summary: 'Serie de crecimiento agregada (7d, 30d, 6m, 12m)' })
+  growth(@Query('range') range?: string) {
+    return this.admin.growthAnalytics(range ?? '6m');
+  }
+
   @Get('analytics')
   @RequirePermissions(AuthPermission.VIEW_ANALYTICS)
   @ApiOperation({ summary: 'Métricas globales (requiere view_analytics)' })
