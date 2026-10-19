@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import {
   NotificationType,
   SpecialDrinkApprovalStatus,
@@ -19,22 +19,65 @@ export class AdminSpecialDrinksService {
     private readonly notifications: NotificationsService,
   ) {}
 
+  private readonly listInclude = {
+    bar: {
+      select: {
+        id: true,
+        businessName: true,
+        slug: true,
+        logoUrl: true,
+        subscription: { select: { plan: true } },
+      },
+    },
+    materializedDrink: { select: { id: true } },
+  };
+
   async listPending(limit = 100) {
+    return this.listByApprovalStatus(SpecialDrinkApprovalStatus.PENDING_REVIEW, limit);
+  }
+
+  async moderationCounts(): Promise<{ pending: number; approved: number; rejected: number }> {
+    const base = { deletedAt: null };
+    const [pending, approved, rejected] = await Promise.all([
+      this.prisma.barSpecialDrink.count({
+        where: { ...base, approvalStatus: SpecialDrinkApprovalStatus.PENDING_REVIEW },
+      }),
+      this.prisma.barSpecialDrink.count({
+        where: { ...base, approvalStatus: SpecialDrinkApprovalStatus.APPROVED },
+      }),
+      this.prisma.barSpecialDrink.count({
+        where: { ...base, approvalStatus: SpecialDrinkApprovalStatus.REJECTED },
+      }),
+    ]);
+    return { pending, approved, rejected };
+  }
+
+  async listByApprovalStatus(approvalStatus: SpecialDrinkApprovalStatus | string, limit = 50) {
+    const status = this.resolveApprovalStatus(approvalStatus);
+    const orderBy =
+      status === SpecialDrinkApprovalStatus.PENDING_REVIEW
+        ? { createdAt: 'asc' as const }
+        : [{ moderatedAt: 'desc' as const }, { createdAt: 'desc' as const }];
     const rows = await this.prisma.barSpecialDrink.findMany({
       where: {
         deletedAt: null,
-        approvalStatus: SpecialDrinkApprovalStatus.PENDING_REVIEW,
+        approvalStatus: status,
       },
-      include: {
-        bar: {
-          select: { id: true, businessName: true, slug: true, logoUrl: true },
-        },
-        materializedDrink: { select: { id: true } },
-      },
-      orderBy: { createdAt: 'asc' },
+      include: this.listInclude,
+      orderBy,
       take: Math.min(Math.max(limit, 1), 200),
     });
     return { items: rows.map(mapSpecialDrink), total: rows.length };
+  }
+
+  private resolveApprovalStatus(value: SpecialDrinkApprovalStatus | string): SpecialDrinkApprovalStatus {
+    const normalized = String(value).trim().toUpperCase();
+    if (normalized in SpecialDrinkApprovalStatus) {
+      return SpecialDrinkApprovalStatus[normalized as keyof typeof SpecialDrinkApprovalStatus];
+    }
+    throw new BadRequestException(
+      `approvalStatus inválido. Valores: ${Object.values(SpecialDrinkApprovalStatus).join(', ')}`,
+    );
   }
 
   async approve(drinkId: string, adminUserId: string) {

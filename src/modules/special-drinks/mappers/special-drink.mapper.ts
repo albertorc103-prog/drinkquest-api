@@ -26,6 +26,7 @@ export type SpecialDrinkRow = {
     businessName: string;
     slug: string;
     logoUrl: string | null;
+    subscription?: { plan: string } | null;
   };
   materializedDrink?: { id: string } | null;
 };
@@ -57,6 +58,7 @@ export function mapSpecialDrink(row: SpecialDrinkRow) {
           businessName: row.bar.businessName,
           slug: row.bar.slug,
           logoUrl: row.bar.logoUrl,
+          plan: row.bar.subscription?.plan ?? null,
         }
       : undefined,
   };

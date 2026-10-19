@@ -25,6 +25,23 @@ export class AdminSpecialDrinksController {
     return this.moderation.listPending(parseInt(limit ?? '100', 10));
   }
 
+  @Get('moderation/summary')
+  @RequirePermissions(AuthPermission.MODERATE_CONTENT)
+  @ApiOperation({ summary: 'Conteos de moderación de cócteles de autor' })
+  moderationSummary() {
+    return this.moderation.moderationCounts();
+  }
+
+  @Get('moderation')
+  @RequirePermissions(AuthPermission.MODERATE_CONTENT)
+  @ApiOperation({ summary: 'Listado por approvalStatus (máx. 200)' })
+  moderationList(@Query('approvalStatus') approvalStatus: string, @Query('limit') limit?: string) {
+    return this.moderation.listByApprovalStatus(
+      approvalStatus,
+      parseInt(limit ?? '50', 10),
+    );
+  }
+
   @Patch(':id/approve')
   @RequirePermissions(AuthPermission.MODERATE_CONTENT)
   @ApiOperation({ summary: 'Aprobar bebida especializada' })
