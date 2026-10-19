@@ -26,6 +26,23 @@ export class AdminPromotionsController {
     return this.moderation.listPending(parseInt(limit ?? '100', 10));
   }
 
+  @Get('moderation/summary')
+  @RequirePermissions(AuthPermission.MODERATE_CONTENT)
+  @ApiOperation({ summary: 'Conteos de moderación por approvalStatus' })
+  moderationSummary() {
+    return this.moderation.moderationCounts();
+  }
+
+  @Get('moderation')
+  @RequirePermissions(AuthPermission.MODERATE_CONTENT)
+  @ApiOperation({ summary: 'Listado de promociones por approvalStatus (máx. 200)' })
+  moderationList(@Query('approvalStatus') approvalStatus: string, @Query('limit') limit?: string) {
+    return this.moderation.listByApprovalStatus(
+      approvalStatus,
+      parseInt(limit ?? '50', 10),
+    );
+  }
+
   @Get('feed-debug')
   @RequirePermissions(AuthPermission.MODERATE_CONTENT)
   @ApiOperation({

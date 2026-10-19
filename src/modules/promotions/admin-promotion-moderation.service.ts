@@ -60,15 +60,52 @@ export class AdminPromotionModerationService {
   }
 
   async listPending(limit = 100): Promise<PromotionResponseDto[]> {
+    return this.listByApprovalStatus(PromotionApprovalStatus.PENDING_REVIEW, limit);
+  }
+
+  async moderationCounts(): Promise<{ pending: number; approved: number; rejected: number }> {
+    const [pending, approved, rejected] = await Promise.all([
+      this.prisma.barPromotion.count({
+        where: { approvalStatus: PromotionApprovalStatus.PENDING_REVIEW },
+      }),
+      this.prisma.barPromotion.count({
+        where: { approvalStatus: PromotionApprovalStatus.APPROVED },
+      }),
+      this.prisma.barPromotion.count({
+        where: { approvalStatus: PromotionApprovalStatus.REJECTED },
+      }),
+    ]);
+    return { pending, approved, rejected };
+  }
+
+  async listByApprovalStatus(
+    approvalStatus: PromotionApprovalStatus | string,
+    limit = 50,
+  ): Promise<PromotionResponseDto[]> {
+    const status = this.resolveApprovalStatus(approvalStatus);
+    const orderBy =
+      status === PromotionApprovalStatus.PENDING_REVIEW
+        ? [{ createdAt: 'asc' as const }]
+        : [{ moderatedAt: 'desc' as const }, { createdAt: 'desc' as const }];
     const rows = await this.prisma.barPromotion.findMany({
-      where: { approvalStatus: PromotionApprovalStatus.PENDING_REVIEW },
+      where: { approvalStatus: status },
       take: Math.min(Math.max(limit, 1), 200),
-      orderBy: [{ createdAt: 'asc' }],
+      orderBy,
       include: {
         bar: { select: { id: true, businessName: true, slug: true, logoUrl: true, city: true } },
       },
     });
     return rows.map((row) => mapPromotion(row));
+  }
+
+  private resolveApprovalStatus(value: PromotionApprovalStatus | string): PromotionApprovalStatus {
+    const normalized = String(value).trim().toUpperCase();
+    if (normalized in PromotionApprovalStatus) {
+      return PromotionApprovalStatus[normalized as keyof typeof PromotionApprovalStatus];
+    }
+    throw new BadRequestException(
+      `approvalStatus inválido. Valores: ${Object.values(PromotionApprovalStatus).join(', ')}`,
+    );
   }
 
   /**
