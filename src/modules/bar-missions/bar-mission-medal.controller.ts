@@ -79,4 +79,30 @@ export class BarMissionMedalController {
   ) {
     return this.medals.submit(user.sub, seasonId, versionId);
   }
+
+  @Get(':versionId/design-proposals')
+  @ApiOperation({ summary: 'Propuestas gráficas enviadas por DrinkQuest (conjunto SENT)' })
+  listDesignProposals(
+    @CurrentUser() user: JwtPayload,
+    @Param('seasonId') seasonId: string,
+    @Param('versionId') versionId: string,
+  ) {
+    return this.medals.listDesignProposalsForBar(user.sub, seasonId, versionId);
+  }
+
+  @Post(':versionId/design-proposals/:proposalId/select')
+  @ApiOperation({ summary: 'Confirmar selección definitiva de una propuesta' })
+  selectDesignProposal(
+    @CurrentUser() user: JwtPayload,
+    @Param('seasonId') seasonId: string,
+    @Param('versionId') versionId: string,
+    @Param('proposalId') proposalId: string,
+  ) {
+    return this.medals.confirmDesignProposalSelection(
+      user.sub,
+      seasonId,
+      versionId,
+      proposalId,
+    );
+  }
 }

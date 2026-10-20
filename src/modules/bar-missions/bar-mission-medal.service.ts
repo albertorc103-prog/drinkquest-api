@@ -28,6 +28,7 @@ import {
   validateDesignConfigInput,
 } from './bar-medal-design-config';
 import { mapMedalVisualFields } from './bar-medal-visual.util';
+import { BarMedalDesignProposalBarService } from './bar-medal-design-proposal-bar.service';
 import {
   UpdateBarMedalDto,
   UpsertBarMedalDto,
@@ -56,7 +57,30 @@ export class BarMissionMedalService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly barAccess: BarAccessService,
+    private readonly designProposalBar: BarMedalDesignProposalBarService,
   ) {}
+
+  listDesignProposalsForBar(
+    ownerUserId: string,
+    seasonId: string,
+    versionId: string,
+  ) {
+    return this.designProposalBar.listSentProposals(ownerUserId, seasonId, versionId);
+  }
+
+  confirmDesignProposalSelection(
+    ownerUserId: string,
+    seasonId: string,
+    versionId: string,
+    proposalId: string,
+  ) {
+    return this.designProposalBar.confirmSelection(
+      ownerUserId,
+      seasonId,
+      versionId,
+      proposalId,
+    );
+  }
 
   async getCurrent(ownerUserId: string, seasonId: string) {
     const { bar } = await this.assertOwnerFeature(ownerUserId);
@@ -187,6 +211,9 @@ export class BarMissionMedalService {
     const version = await this.requireOwnedVersion(season.id, versionId);
     if (!EDITABLE.includes(version.status)) {
       throw new BadRequestException('MEDAL_VERSION_NOT_EDITABLE');
+    }
+    if (version.usesDesignProposalFlow && dto.designConfig !== undefined) {
+      throw new BadRequestException('DESIGN_CONFIG_LOCKED');
     }
 
     const title = dto.title?.trim() ?? version.title;
@@ -416,6 +443,9 @@ export class BarMissionMedalService {
     disabledAt: Date | null;
     createdAt: Date;
     updatedAt: Date;
+    usesDesignProposalFlow?: boolean;
+    selectedProposalId?: string | null;
+    designSelectionConfirmedAt?: Date | null;
     conditions: Array<{
       id: string;
       type: BarMissionMedalConditionType;
@@ -436,6 +466,10 @@ export class BarMissionMedalService {
       xpReward: version.xpReward,
       templateId: version.templateId,
       ...visualFields,
+      usesDesignProposalFlow: version.usesDesignProposalFlow ?? false,
+      selectedProposalId: version.selectedProposalId ?? null,
+      designSelectionConfirmedAt:
+        version.designSelectionConfirmedAt?.toISOString() ?? null,
       reviewComment: version.reviewNote,
       moderatedByAdminId: version.moderatedByAdminId,
       moderatedAt: version.moderatedAt?.toISOString() ?? null,

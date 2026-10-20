@@ -12,7 +12,12 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { resolveDesignConfigForClient } from './bar-medal-design-config';
+import {
+  assertDesignProposalReadyForModeration,
+  assertDirectArtworkAllowed,
+} from './bar-medal-design-proposal-flow.util';
 import { assertArtworkReadyForPublish } from './bar-medal-visual.util';
+import { AdminBarMedalDesignProposalService } from './admin-bar-medal-design-proposal.service';
 import { BarMissionMedalService } from './bar-mission-medal.service';
 
 const XP_MAX = 500;
@@ -29,7 +34,36 @@ export class AdminBarMissionMedalService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly medals: BarMissionMedalService,
+    private readonly designProposals: AdminBarMedalDesignProposalService,
   ) {}
+
+  createDesignProposalBatch(versionId: string, adminId: string) {
+    return this.designProposals.createBatch(versionId, adminId);
+  }
+
+  getDesignProposalBatch(versionId: string) {
+    return this.designProposals.getBatchForVersion(versionId);
+  }
+
+  assignDesignProposal(
+    versionId: string,
+    batchId: string,
+    position: number,
+    adminId: string,
+    artworkAssetId: string,
+  ) {
+    return this.designProposals.assignProposal(
+      versionId,
+      batchId,
+      position,
+      adminId,
+      artworkAssetId,
+    );
+  }
+
+  sendDesignProposalBatch(versionId: string, batchId: string, adminId: string) {
+    return this.designProposals.sendBatch(versionId, batchId, adminId);
+  }
 
   async list(params: {
     /** Omitido o PENDING_REVIEW por defecto. "ALL" = sin filtro de status. */
@@ -192,13 +226,17 @@ export class AdminBarMissionMedalService {
     ) {
       throw new BadRequestException('UNSUPPORTED_CONDITION');
     }
-    const mode = version.visualMode ?? BarMedalVisualMode.BUILDER_V1;
-    if (mode === BarMedalVisualMode.ADMIN_ARTWORK) {
-      assertArtworkReadyForPublish(version);
+    if (version.usesDesignProposalFlow) {
+      await assertDesignProposalReadyForModeration(this.prisma, version);
     } else {
-      const { designConfigValid } = resolveDesignConfigForClient(version.designConfig);
-      if (!designConfigValid) {
-        throw new BadRequestException('INVALID_DESIGN_CONFIG');
+      const mode = version.visualMode ?? BarMedalVisualMode.BUILDER_V1;
+      if (mode === BarMedalVisualMode.ADMIN_ARTWORK) {
+        assertArtworkReadyForPublish(version);
+      } else {
+        const { designConfigValid } = resolveDesignConfigForClient(version.designConfig);
+        if (!designConfigValid) {
+          throw new BadRequestException('INVALID_DESIGN_CONFIG');
+        }
       }
     }
     const updated = await this.prisma.barMissionMedalVersion.update({
@@ -232,6 +270,7 @@ export class AdminBarMissionMedalService {
     if (!ARTWORK_EDITABLE.includes(version.status)) {
       throw new BadRequestException('MEDAL_ARTWORK_NOT_EDITABLE');
     }
+    assertDirectArtworkAllowed(version);
 
     let artworkAssetId: string | null = null;
     let artworkUrl: string | null = null;
@@ -364,7 +403,11 @@ export class AdminBarMissionMedalService {
     if (version.status !== BarMissionMedalVersionStatus.APPROVED) {
       throw new BadRequestException('INVALID_STATUS_TRANSITION');
     }
-    assertArtworkReadyForPublish(version);
+    if (version.usesDesignProposalFlow) {
+      await assertDesignProposalReadyForModeration(this.prisma, version);
+    } else {
+      assertArtworkReadyForPublish(version);
+    }
 
     try {
       const updated = await this.prisma.$transaction(async (tx) => {

@@ -3,8 +3,10 @@ import {
   Controller,
   Get,
   Param,
+  ParseIntPipe,
   Patch,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -23,6 +25,7 @@ import {
   AdminBarMedalReviewDto,
   AdminBarMedalRewardDto,
 } from './dto/bar-mission-medal.dto';
+import { AdminMedalDesignProposalAssignDto } from './dto/bar-medal-design-proposal.dto';
 
 @ApiTags('admin-bar-mission-medals')
 @ApiBearerAuth()
@@ -57,6 +60,53 @@ export class AdminBarMissionMedalController {
       page: page ? parseInt(page, 10) : 1,
       limit: limit ? parseInt(limit, 10) : 20,
     });
+  }
+
+  @Post(':versionId/design-proposals/batches')
+  @RequirePermissions(AuthPermission.MODERATE_CONTENT)
+  @ApiOperation({ summary: 'Iniciar conjunto de 5 propuestas gráficas (DRAFT)' })
+  createDesignProposalBatch(
+    @CurrentUser() admin: JwtPayload,
+    @Param('versionId') versionId: string,
+  ) {
+    return this.moderation.createDesignProposalBatch(versionId, admin.sub);
+  }
+
+  @Get(':versionId/design-proposals')
+  @RequirePermissions(AuthPermission.MODERATE_CONTENT)
+  @ApiOperation({ summary: 'Conjunto abierto y propuestas de la versión' })
+  getDesignProposals(@Param('versionId') versionId: string) {
+    return this.moderation.getDesignProposalBatch(versionId);
+  }
+
+  @Put(':versionId/design-proposals/batches/:batchId/positions/:position')
+  @RequirePermissions(AuthPermission.MODERATE_CONTENT)
+  @ApiOperation({ summary: 'Asignar o reemplazar imagen en posición 1–5 (solo DRAFT)' })
+  assignDesignProposal(
+    @CurrentUser() admin: JwtPayload,
+    @Param('versionId') versionId: string,
+    @Param('batchId') batchId: string,
+    @Param('position', ParseIntPipe) position: number,
+    @Body() body: AdminMedalDesignProposalAssignDto,
+  ) {
+    return this.moderation.assignDesignProposal(
+      versionId,
+      batchId,
+      position,
+      admin.sub,
+      body.artworkAssetId,
+    );
+  }
+
+  @Post(':versionId/design-proposals/batches/:batchId/send')
+  @RequirePermissions(AuthPermission.MODERATE_CONTENT)
+  @ApiOperation({ summary: 'Enviar las 5 propuestas al establecimiento Legend' })
+  sendDesignProposals(
+    @CurrentUser() admin: JwtPayload,
+    @Param('versionId') versionId: string,
+    @Param('batchId') batchId: string,
+  ) {
+    return this.moderation.sendDesignProposalBatch(versionId, batchId, admin.sub);
   }
 
   @Get(':versionId')

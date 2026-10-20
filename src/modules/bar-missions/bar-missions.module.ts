@@ -3,6 +3,8 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { ReservationsModule } from '../reservations/reservations.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { UsersModule } from '../users/users.module';
+import { AdminBarMedalDesignProposalService } from './admin-bar-medal-design-proposal.service';
+import { BarMedalDesignProposalBarService } from './bar-medal-design-proposal-bar.service';
 import { AdminBarMissionMedalController } from './admin-bar-mission-medal.controller';
 import { AdminBarMissionMedalService } from './admin-bar-mission-medal.service';
 import { BarMissionMedalActiveResolver } from './bar-mission-medal-active.resolver';
@@ -40,6 +42,8 @@ import { UserBarMissionsController } from './user-bar-missions.controller';
     BarMissionsService,
     BarMissionMedalService,
     AdminBarMissionMedalService,
+    AdminBarMedalDesignProposalService,
+    BarMedalDesignProposalBarService,
     BarMissionMedalActiveResolver,
     BarMissionMedalProgressService,
     BarMissionMedalUnlockService,
