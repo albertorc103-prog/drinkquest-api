@@ -1,12 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
-import {
-  RooftopPackageApprovalStatus,
-  RooftopPackageStatus,
-  RooftopVerificationStatus,
-  SubscriptionPlan,
-} from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { mapRooftopPackage } from './mappers/rooftop-package.mapper';
+import { buildRooftopUserFeedWhere } from './rooftop-feed.where';
 
 @Injectable()
 export class RooftopFeedService {
@@ -20,39 +15,14 @@ export class RooftopFeedService {
     const safePage = Math.max(page, 1);
     const skip = (safePage - 1) * safeLimit;
 
-    const where = {
-      deletedAt: null,
-      approvalStatus: RooftopPackageApprovalStatus.APPROVED,
-      status: RooftopPackageStatus.ACTIVE,
-      startsAt: { lte: now },
-      endsAt: { gte: now },
-      bar: {
-        deletedAt: null,
-        isActive: true,
-        rooftopStatus: RooftopVerificationStatus.APPROVED,
-        hasOutdoorSpace: true,
-        subscription: {
-          plan: SubscriptionPlan.LEGEND,
-          OR: [
-            {
-              status: 'TRIAL' as const,
-              OR: [{ trialEndsAt: null }, { trialEndsAt: { gte: now } }],
-            },
-            {
-              status: 'ACTIVE' as const,
-              OR: [{ currentPeriodEnd: null }, { currentPeriodEnd: { gte: now } }],
-            },
-          ],
-        },
-      },
-    };
+    const where = buildRooftopUserFeedWhere(now);
 
     const [rows, total] = await Promise.all([
       this.prisma.barRooftopPackage.findMany({
         where,
         skip,
         take: safeLimit,
-        orderBy: [{ startsAt: 'desc' }],
+        orderBy: [{ startsAt: 'asc' }],
         include: {
           bar: {
             select: {
