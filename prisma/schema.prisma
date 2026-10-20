@@ -265,6 +265,14 @@ enum BarMedalVisualMode {
   BUILDER_V1
 }
 
+/// Conjunto de hasta 5 propuestas gráficas (flujo Legend: admin carga → bar elige).
+enum BarMedalDesignProposalBatchStatus {
+  DRAFT
+  SENT
+  SUPERSEDED
+  CANCELLED
+}
+
 /**
  * Tipos de condición de medalla de local.
  * EVENT_PARTICIPATION está reservado; no aceptar creación en API hasta haber participación verificable.
@@ -357,46 +365,48 @@ model User {
   updatedAt              DateTime          @updatedAt @map("updated_at")
   deletedAt              DateTime?         @map("deleted_at")
 
-  refreshTokens           RefreshToken[]
-  emailVerifications      EmailVerification[]
-  passwordResets          PasswordReset[]
-  bar                     Bar?
-  sentFriendRequests      FriendRequest[]              @relation("FriendRequestSender")
-  receivedFriendRequests  FriendRequest[]              @relation("FriendRequestReceiver")
-  friendshipsA            Friendship[]                 @relation("FriendshipUserA")
-  friendshipsB            Friendship[]                 @relation("FriendshipUserB")
-  blocksInitiated         UserBlock[]                  @relation("BlockInitiator")
-  blocksReceived          UserBlock[]                  @relation("BlockTarget")
-  chatMemberships         ChatParticipant[]
-  messagesSent            ChatMessage[]
-  messageReads            MessageRead[]
-  messageReactions        MessageReaction[]
-  drinkUnlocks            UserDrinkUnlock[]
-  drinkHistory            DrinkHistoryEntry[]
-  favoriteDrinks          UserFavoriteDrink[]
-  promotionActivations    UserPromotionActivation[]
-  userMissions            UserMission[]
-  userAchievements        UserAchievement[]
-  userBarMissionProgress  UserBarMissionProgress[]
-  userBarMedals           UserBarMedal[]
-  barReservations         BarReservation[]
-  globalEventProgress     UserGlobalEventProgress[]
-  globalEventMedals       UserGlobalEventMedal[]
-  posts                   FeedPost[]
-  postLikes               PostLike[]
-  postComments            PostComment[]
-  postCommentLikes        PostCommentLike[]
-  notifications           Notification[]
-  deviceTokens            DeviceToken[]
-  notificationPreferences UserNotificationPreferences?
-  reportsFiled            Report[]                     @relation("ReportReporter")
-  reportsReceived         Report[]                     @relation("ReportTargetUser")
-  qrSessionsScanned       QrSession[]                  @relation("QrScannedBy")
-  createdChatRooms        ChatRoom[]                   @relation("ChatRoomCreator")
-  placeVisits             PlaceVisit[]
-  placeReviews            PlaceReview[]
-  gamificationRewards     GamificationReward[]
-  uploadAssets            UploadAsset[]
+  refreshTokens                     RefreshToken[]
+  emailVerifications                EmailVerification[]
+  passwordResets                    PasswordReset[]
+  bar                               Bar?
+  sentFriendRequests                FriendRequest[]               @relation("FriendRequestSender")
+  receivedFriendRequests            FriendRequest[]               @relation("FriendRequestReceiver")
+  friendshipsA                      Friendship[]                  @relation("FriendshipUserA")
+  friendshipsB                      Friendship[]                  @relation("FriendshipUserB")
+  blocksInitiated                   UserBlock[]                   @relation("BlockInitiator")
+  blocksReceived                    UserBlock[]                   @relation("BlockTarget")
+  chatMemberships                   ChatParticipant[]
+  messagesSent                      ChatMessage[]
+  messageReads                      MessageRead[]
+  messageReactions                  MessageReaction[]
+  drinkUnlocks                      UserDrinkUnlock[]
+  drinkHistory                      DrinkHistoryEntry[]
+  favoriteDrinks                    UserFavoriteDrink[]
+  promotionActivations              UserPromotionActivation[]
+  userMissions                      UserMission[]
+  userAchievements                  UserAchievement[]
+  userBarMissionProgress            UserBarMissionProgress[]
+  userBarMedals                     UserBarMedal[]
+  barReservations                   BarReservation[]
+  globalEventProgress               UserGlobalEventProgress[]
+  globalEventMedals                 UserGlobalEventMedal[]
+  posts                             FeedPost[]
+  postLikes                         PostLike[]
+  postComments                      PostComment[]
+  postCommentLikes                  PostCommentLike[]
+  notifications                     Notification[]
+  deviceTokens                      DeviceToken[]
+  notificationPreferences           UserNotificationPreferences?
+  reportsFiled                      Report[]                      @relation("ReportReporter")
+  reportsReceived                   Report[]                      @relation("ReportTargetUser")
+  qrSessionsScanned                 QrSession[]                   @relation("QrScannedBy")
+  createdChatRooms                  ChatRoom[]                    @relation("ChatRoomCreator")
+  placeVisits                       PlaceVisit[]
+  placeReviews                      PlaceReview[]
+  gamificationRewards               GamificationReward[]
+  uploadAssets                      UploadAsset[]
+  medalDesignProposalBatchesCreated BarMedalDesignProposalBatch[] @relation("MedalDesignProposalBatchCreatedBy")
+  medalDesignProposalBatchesSent    BarMedalDesignProposalBatch[] @relation("MedalDesignProposalBatchSentBy")
 
   @@index([email])
   @@index([role])
@@ -432,7 +442,8 @@ model UploadAsset {
   sizeBytes   Int      @map("size_bytes")
   createdAt   DateTime @default(now()) @map("created_at")
 
-  owner User @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  owner                   User                     @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  barMedalDesignProposals BarMedalDesignProposal[]
 
   @@index([ownerUserId, createdAt])
   @@map("upload_assets")
@@ -893,39 +904,49 @@ model UserBarMissionProgress {
  * NO implica desbloqueable: el motor debe buscar status=ACTIVE explícitamente.
  */
 model BarMissionMedalVersion {
-  id                 String                       @id @default(uuid()) @db.Uuid
-  seasonId           String                       @map("season_id") @db.Uuid
-  version            Int                          @default(1)
-  title              String
-  description        String
-  status             BarMissionMedalVersionStatus @default(DRAFT)
-  conditionMode      BarMissionMedalConditionMode @default(ALL) @map("condition_mode")
+  id                         String                       @id @default(uuid()) @db.Uuid
+  seasonId                   String                       @map("season_id") @db.Uuid
+  version                    Int                          @default(1)
+  title                      String
+  description                String
+  status                     BarMissionMedalVersionStatus @default(DRAFT)
+  conditionMode              BarMissionMedalConditionMode @default(ALL) @map("condition_mode")
   /// Solo ADMIN/DrinkQuest; el bar no lo define. Preparado para FASE 6.
-  xpReward           Int                          @default(0) @map("xp_reward")
-  templateId         String?                      @map("template_id")
-  designConfig       Json?                        @map("design_config")
+  xpReward                   Int                          @default(0) @map("xp_reward")
+  templateId                 String?                      @map("template_id")
+  designConfig               Json?                        @map("design_config")
   /// ADMIN_ARTWORK = imagen subida por admin; BUILDER_V1 = designConfig renderer.
-  visualMode         BarMedalVisualMode           @default(ADMIN_ARTWORK) @map("visual_mode")
+  visualMode                 BarMedalVisualMode           @default(ADMIN_ARTWORK) @map("visual_mode")
   /// UploadAsset.id del artwork (ownership admin). Snapshot por versión.
-  artworkAssetId     String?                      @map("artwork_asset_id") @db.Uuid
+  artworkAssetId             String?                      @map("artwork_asset_id") @db.Uuid
   /// URL pública congelada del artwork (no leer logo mutable del bar).
-  artworkUrl         String?                      @map("artwork_url")
+  artworkUrl                 String?                      @map("artwork_url")
   /// Comentario admin (request-changes / reject). Alias API: reviewComment.
-  reviewNote         String?                      @map("review_note")
-  moderatedByAdminId String?                      @map("moderated_by_admin_id") @db.Uuid
-  moderatedAt        DateTime?                    @map("moderated_at")
-  submittedByUserId  String?                      @map("submitted_by_user_id") @db.Uuid
-  submittedAt        DateTime?                    @map("submitted_at")
-  approvedAt         DateTime?                    @map("approved_at")
-  activatedAt        DateTime?                    @map("activated_at")
-  disabledAt         DateTime?                    @map("disabled_at")
-  createdAt          DateTime                     @default(now()) @map("created_at")
-  updatedAt          DateTime                     @updatedAt @map("updated_at")
+  reviewNote                 String?                      @map("review_note")
+  moderatedByAdminId         String?                      @map("moderated_by_admin_id") @db.Uuid
+  moderatedAt                DateTime?                    @map("moderated_at")
+  submittedByUserId          String?                      @map("submitted_by_user_id") @db.Uuid
+  submittedAt                DateTime?                    @map("submitted_at")
+  approvedAt                 DateTime?                    @map("approved_at")
+  activatedAt                DateTime?                    @map("activated_at")
+  disabledAt                 DateTime?                    @map("disabled_at")
+  createdAt                  DateTime                     @default(now()) @map("created_at")
+  updatedAt                  DateTime                     @updatedAt @map("updated_at")
+  /**
+   * true = versión sujeta al flujo de 5 propuestas (admin envía → bar confirma).
+   * false = legacy (ADMIN_ARTWORK directo o BUILDER_V1). No inferir solo por artworkUrl.
+   */
+  usesDesignProposalFlow     Boolean                      @default(false) @map("uses_design_proposal_flow")
+  /// Propuesta elegida por el bar (inmutable tras designSelectionConfirmedAt).
+  selectedProposalId         String?                      @unique @map("selected_proposal_id") @db.Uuid
+  designSelectionConfirmedAt DateTime?                    @map("design_selection_confirmed_at")
 
-  season            BarMissionSeason           @relation("SeasonMedalVersions", fields: [seasonId], references: [id], onDelete: Cascade)
-  conditions        BarMissionMedalCondition[]
-  unlocks           UserBarMedal[]
-  currentForSeasons BarMissionSeason[]         @relation("SeasonCurrentMedalVersion")
+  season                BarMissionSeason              @relation("SeasonMedalVersions", fields: [seasonId], references: [id], onDelete: Cascade)
+  conditions            BarMissionMedalCondition[]
+  unlocks               UserBarMedal[]
+  currentForSeasons     BarMissionSeason[]            @relation("SeasonCurrentMedalVersion")
+  designProposalBatches BarMedalDesignProposalBatch[]
+  selectedProposal      BarMedalDesignProposal?       @relation("MedalVersionSelectedProposal", fields: [selectedProposalId], references: [id], onDelete: Restrict)
 
   @@unique([seasonId, version])
   @@index([seasonId])
@@ -934,6 +955,46 @@ model BarMissionMedalVersion {
   /// UNIQUE parcial PostgreSQL: una sola ACTIVE por season
   /// → migration 20261006140000_fase4_one_active_medal_per_season
   @@map("bar_mission_medal_versions")
+}
+
+/// Hasta 5 imágenes por ronda, asociadas a una versión de medalla (Legend).
+model BarMedalDesignProposalBatch {
+  id               String                            @id @default(uuid()) @db.Uuid
+  medalVersionId   String                            @map("medal_version_id") @db.Uuid
+  status           BarMedalDesignProposalBatchStatus @default(DRAFT)
+  createdByAdminId String                            @map("created_by_admin_id") @db.Uuid
+  sentByAdminId    String?                           @map("sent_by_admin_id") @db.Uuid
+  sentAt           DateTime?                         @map("sent_at")
+  createdAt        DateTime                          @default(now()) @map("created_at")
+  updatedAt        DateTime                          @updatedAt @map("updated_at")
+
+  medalVersion   BarMissionMedalVersion   @relation(fields: [medalVersionId], references: [id], onDelete: Cascade)
+  createdByAdmin User                     @relation("MedalDesignProposalBatchCreatedBy", fields: [createdByAdminId], references: [id], onDelete: Restrict)
+  sentByAdmin    User?                    @relation("MedalDesignProposalBatchSentBy", fields: [sentByAdminId], references: [id], onDelete: SetNull)
+  proposals      BarMedalDesignProposal[]
+
+  @@index([medalVersionId])
+  @@index([medalVersionId, status])
+  @@map("bar_medal_design_proposal_batches")
+}
+
+/// Una imagen candidata (posición 1–5) dentro de un conjunto.
+model BarMedalDesignProposal {
+  id             String   @id @default(uuid()) @db.Uuid
+  batchId        String   @map("batch_id") @db.Uuid
+  position       Int
+  artworkAssetId String   @map("artwork_asset_id") @db.Uuid
+  imageUrl       String   @map("image_url")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  batch              BarMedalDesignProposalBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  artworkAsset       UploadAsset                 @relation(fields: [artworkAssetId], references: [id], onDelete: Restrict)
+  selectedForVersion BarMissionMedalVersion?     @relation("MedalVersionSelectedProposal")
+
+  @@unique([batchId, position])
+  @@index([batchId])
+  @@map("bar_medal_design_proposals")
 }
 
 model BarMissionMedalCondition {
