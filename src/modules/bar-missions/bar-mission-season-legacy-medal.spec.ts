@@ -73,6 +73,16 @@ describe('BarMissionsService season create — medalTitle legacy optional (FASE 
     expect(created.missions).toHaveLength(3);
   });
 
+  it('createSeason no crea BarMissionMedalVersion (versión vía createDraft)', async () => {
+    await service.createSeason('owner-a', {
+      ...baseDto,
+      medalTitle: 'Medalla Sheldz',
+      medalDescription: 'En preparación.',
+    } as any);
+    expect(seasons).toHaveLength(1);
+    expect(prisma.barMissionMedalVersion).toBeUndefined();
+  });
+
   it('TEST 31: season con medalTitle legacy sigue creando correctamente', async () => {
     const created = await service.createSeason('owner-a', {
       ...baseDto,

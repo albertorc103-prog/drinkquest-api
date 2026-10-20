@@ -266,22 +266,53 @@ async function main() {
     } else if (!versionsTable) {
       na('versiones aún no creadas; backfill corre en FASE2 migrate');
     } else {
-      const missingVersion = await prisma.$queryRawUnsafe(`
+      // createSeason no crea BarMissionMedalVersion; el bar usa createDraft después.
+      // Bloquear solo si hay UserBarMedal sin ninguna versión (corrupción real).
+      const inconsistentWithoutVersion = await prisma.$queryRawUnsafe(`
         SELECT COUNT(*)::int AS qty
         FROM bar_mission_seasons s
         WHERE s.deleted_at IS NULL
           AND NOT EXISTS (
             SELECT 1 FROM bar_mission_medal_versions v WHERE v.season_id = s.id
           )
+          AND EXISTS (
+            SELECT 1 FROM user_bar_medals u WHERE u.season_id = s.id
+          )
       `);
-      const mv = missingVersion[0]?.qty ?? 0;
-      if (mv === 0) console.log('  OK — seasons tienen versión');
-      else {
+      const inconsistentQty = inconsistentWithoutVersion[0]?.qty ?? 0;
+      const preparationWithoutVersion = await prisma.$queryRawUnsafe(`
+        SELECT COUNT(*)::int AS qty
+        FROM bar_mission_seasons s
+        WHERE s.deleted_at IS NULL
+          AND s.current_medal_version_id IS NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM bar_mission_medal_versions v WHERE v.season_id = s.id
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM user_bar_medals u WHERE u.season_id = s.id
+          )
+      `);
+      const prepQty = preparationWithoutVersion[0]?.qty ?? 0;
+      if (inconsistentQty === 0) {
+        console.log('  OK — 0 seasons con unlocks sin versión de medalla');
+      } else {
         findings.push({
           code: 'SEASON_WITHOUT_VERSION',
           severity: 'blocker',
-          message: `${mv} seasons sin BarMissionMedalVersion`,
+          message: `${inconsistentQty} season(s) con UserBarMedal pero sin BarMissionMedalVersion`,
         });
+      }
+      if (prepQty === 0) {
+        console.log('  OK — 0 seasons en preparación sin versión');
+      } else {
+        findings.push({
+          code: 'SEASON_MEDAL_PREP',
+          severity: 'warn',
+          message: `${prepQty} season(s) en preparación (sin versión aún; createSeason → createDraft)`,
+        });
+        console.log(
+          `  INFO — ${prepQty} temporada(s) sin versión aún (estado válido mientras no haya unlocks)`,
+        );
       }
 
       if (hasMedalVersionCol) {

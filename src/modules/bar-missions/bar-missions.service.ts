@@ -76,6 +76,7 @@ export class BarMissionsService {
         });
       }
 
+      // BarMissionMedalVersion se crea aparte (BarMissionMedalService.createDraft).
       return tx.barMissionSeason.create({
         data: {
           barId: bar.id,
