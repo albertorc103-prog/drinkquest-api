@@ -260,8 +260,8 @@ describe('BarMissionMedalService FASE 3', () => {
       isSubscriptionActive: () => true,
     };
 
-    service = new BarMissionMedalService(prisma, barAccess);
-    admin = new AdminBarMissionMedalService(prisma, service);
+    service = new BarMissionMedalService(prisma, barAccess, {} as any);
+    admin = new AdminBarMissionMedalService(prisma, service, {} as any);
   });
 
   const validDesign = {

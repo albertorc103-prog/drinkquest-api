@@ -28,6 +28,9 @@ describe('Admin medal artwork (temporal ADMIN_ARTWORK)', () => {
     disabledAt: null,
     createdAt: new Date(),
     updatedAt: new Date(),
+    usesDesignProposalFlow: false,
+    selectedProposalId: null,
+    designSelectionConfirmedAt: null,
     conditions: [{ id: 'c1', type: 'VISITS', targetValue: 3, referenceId: null, position: 0 }],
   };
 
@@ -39,7 +42,8 @@ describe('Admin medal artwork (temporal ADMIN_ARTWORK)', () => {
         status: v.status,
       })),
     };
-    return new AdminBarMissionMedalService(prisma as any, medalService as any);
+    const designProposals = {} as any;
+    return new AdminBarMissionMedalService(prisma as any, medalService as any, designProposals);
   }
 
   it('setArtwork congela asset en versión editable', async () => {
@@ -76,6 +80,23 @@ describe('Admin medal artwork (temporal ADMIN_ARTWORK)', () => {
     );
     expect(result.artworkAvailable).toBe(true);
     expect(result.artworkUrl).toBe('https://cdn.example/medals/a.webp');
+  });
+
+  it('usesDesignProposalFlow bloquea setArtwork directo', async () => {
+    const prisma = {
+      barMissionMedalVersion: {
+        findUnique: jest.fn(async () => ({
+          ...versionBase,
+          usesDesignProposalFlow: true,
+        })),
+        update: jest.fn(),
+      },
+      uploadAsset: { findUnique: jest.fn() },
+    };
+    const admin = build(prisma);
+    await expect(
+      admin.setArtwork('v1', 'admin-1', { artworkAssetId: 'asset-1' }),
+    ).rejects.toMatchObject({ message: 'DESIGN_PROPOSAL_ARTWORK_LOCKED' });
   });
 
   it('ACTIVE no permite mutar artwork', async () => {

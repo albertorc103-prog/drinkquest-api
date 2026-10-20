@@ -306,8 +306,8 @@ describe('BarMissionMedalService designConfig integración', () => {
       isSubscriptionActive: () => true,
     };
 
-    service = new BarMissionMedalService(prisma, barAccess);
-    admin = new AdminBarMissionMedalService(prisma, service);
+    service = new BarMissionMedalService(prisma, barAccess, {} as any);
+    admin = new AdminBarMissionMedalService(prisma, service, {} as any);
   });
 
   it('7. identity LOGO válido', async () => {
@@ -426,6 +426,39 @@ describe('BarMissionMedalService designConfig integración', () => {
     expect(mapped.isLegacyVisualFallback).toBe(true);
     expect(mapped.visual.shape).toBe('CIRCLE');
     expect(mapped.visual.emblem).toBe('COCKTAIL_GLASS');
+  });
+
+  it('17. mapVersion expone flujo de propuestas Legend', () => {
+    const confirmedAt = new Date('2026-10-19T12:00:00.000Z');
+    const mapped = service.mapVersion({
+      id: 'v-proposal',
+      seasonId: 'season-a',
+      version: 1,
+      title: 'Legend',
+      description: 'Desc',
+      status: BarMissionMedalVersionStatus.PENDING_REVIEW,
+      conditionMode: BarMissionMedalConditionMode.ALL,
+      xpReward: 100,
+      templateId: null,
+      designConfig: baseDesign,
+      reviewNote: null,
+      moderatedByAdminId: null,
+      moderatedAt: null,
+      submittedAt: null,
+      approvedAt: null,
+      activatedAt: null,
+      disabledAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      usesDesignProposalFlow: true,
+      selectedProposalId: 'proposal-uuid',
+      designSelectionConfirmedAt: confirmedAt,
+      conditions: [],
+    });
+    expect(mapped.usesDesignProposalFlow).toBe(true);
+    expect(mapped.selectedProposalId).toBe('proposal-uuid');
+    expect(mapped.designSelectionConfirmedAt).toBe(confirmedAt.toISOString());
+    expect(mapped).not.toHaveProperty('artworkAssetId');
   });
 
   it('ADMIN no aprueba designConfig inválido', async () => {
