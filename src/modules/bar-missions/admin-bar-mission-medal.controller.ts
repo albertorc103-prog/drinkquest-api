@@ -74,9 +74,17 @@ export class AdminBarMissionMedalController {
 
   @Get(':versionId/design-proposals')
   @RequirePermissions(AuthPermission.MODERATE_CONTENT)
-  @ApiOperation({ summary: 'Conjunto abierto y propuestas de la versión' })
-  getDesignProposals(@Param('versionId') versionId: string) {
-    return this.moderation.getDesignProposalBatch(versionId);
+  @ApiOperation({
+    summary:
+      'Conjunto abierto y propuestas de la versión (tras confirmación del bar solo la elegida; audit=1 historial)',
+  })
+  getDesignProposals(
+    @Param('versionId') versionId: string,
+    @Query('audit') audit?: string,
+  ) {
+    const includeAudit =
+      audit === '1' || audit === 'true' || audit?.toLowerCase() === 'yes';
+    return this.moderation.getDesignProposalBatch(versionId, includeAudit);
   }
 
   @Put(':versionId/design-proposals/batches/:batchId/positions/:position')

@@ -321,9 +321,14 @@ describe('FASE 7 public medal + stats APIs', () => {
     }));
     prisma.userBarMedal.findFirst = jest.fn(async () => ({ seasonId: 's1' }));
     const res = await publicSvc.getProgressByBarId('u1', 'bar-1');
-    expect(res.unlocked).toBe(true);
-    expect(res.medalVersionId).toBe('v1');
-    expect(res.title).toBe('Old Guard');
+    expect(res).toEqual(
+      expect.objectContaining({
+        available: true,
+        unlocked: true,
+        medalVersionId: 'v1',
+        title: 'Old Guard',
+      }),
+    );
   });
 
   it('TEST 9: legacy medalVersionId null', async () => {

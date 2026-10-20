@@ -73,6 +73,39 @@ describe('BarMedalDesignProposalBarService', () => {
     expect(result.selection.confirmed).toBe(false);
   });
 
+  it('tras confirmación solo expone la propuesta elegida', async () => {
+    const confirmedVersion = {
+      ...versionRow,
+      selectedProposalId: proposalId,
+      designSelectionConfirmedAt: new Date(),
+    };
+    const prisma = {
+      barMissionSeason: {
+        findFirst: jest.fn(async () => ({ id: seasonId, barId: 'bar-1' })),
+      },
+      barMissionMedalVersion: {
+        findFirst: jest.fn(async () => confirmedVersion),
+      },
+      barMedalDesignProposalBatch: {
+        findFirst: jest.fn(async () => ({
+          id: batchId,
+          status: BarMedalDesignProposalBatchStatus.SENT,
+          sentAt: new Date(),
+          proposals: [
+            { id: 'p1', position: 1, imageUrl: 'https://cdn/1.webp' },
+            { id: proposalId, position: 2, imageUrl: 'https://cdn/2.webp' },
+            { id: 'p3', position: 3, imageUrl: 'https://cdn/3.webp' },
+          ],
+        })),
+      },
+    };
+    const svc = build(prisma);
+    const result = await svc.listSentProposals(ownerId, seasonId, versionId);
+    expect(result.proposals).toHaveLength(1);
+    expect(result.proposals[0].id).toBe(proposalId);
+    expect(result.selection.confirmed).toBe(true);
+  });
+
   it('temporada de otro bar → 404', async () => {
     const prisma = {
       barMissionSeason: { findFirst: jest.fn(async () => null) },

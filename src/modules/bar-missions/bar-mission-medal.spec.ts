@@ -26,10 +26,57 @@ describe('BarMissionMedalService FASE 3', () => {
     medalDescription: 'Desc',
     currentMedalVersionId: null as string | null,
   };
+  const seasonBSameBar = {
+    id: 'season-b-a',
+    barId: 'bar-a',
+    deletedAt: null,
+    title: 'Temp B',
+    medalTitle: 'Medalla B',
+    medalDescription: 'Desc B',
+    currentMedalVersionId: null as string | null,
+  };
+
+  const seasonById = (id: string) => {
+    if (id === seasonA.id) return seasonA;
+    if (id === seasonBSameBar.id) return seasonBSameBar;
+    return null;
+  };
+
+  const filterMedalVersions = (where: any, rows: any[]) =>
+    rows.filter((v) => {
+      if (where.id) {
+        if (typeof where.id === 'string' && v.id !== where.id) return false;
+        if (where.id.not && v.id === where.id.not) return false;
+      }
+      if (where.NOT?.id && v.id === where.NOT.id) return false;
+      if (where.seasonId && v.seasonId !== where.seasonId) return false;
+      if (where.status) {
+        if (typeof where.status === 'string' && v.status !== where.status) return false;
+        if (where.status.in && !where.status.in.includes(v.status)) return false;
+      }
+      if (where.season) {
+        const season = seasonById(v.seasonId);
+        if (!season) return false;
+        if (where.season.barId && season.barId !== where.season.barId) return false;
+        if (where.season.id?.not && v.seasonId === where.season.id.not) return false;
+        if (
+          where.season.deletedAt !== undefined &&
+          season.deletedAt !== where.season.deletedAt
+        ) {
+          return false;
+        }
+      }
+      return true;
+    });
   const missionA = {
     id: 'mission-a',
     seasonId: 'season-a',
     season: { id: 'season-a', barId: 'bar-a' },
+  };
+  const missionBSameBar = {
+    id: 'mission-b-a',
+    seasonId: 'season-b-a',
+    season: { id: 'season-b-a', barId: 'bar-a' },
   };
   const missionOther = {
     id: 'mission-b',
@@ -48,8 +95,10 @@ describe('BarMissionMedalService FASE 3', () => {
     versions = [];
     conditions = [];
     seasonA.currentMedalVersionId = null;
+    seasonBSameBar.currentMedalVersionId = null;
 
     prisma = {
+      $executeRaw: jest.fn(async () => []),
       bar: {
         findUnique: jest.fn(async ({ where }: any) => {
           if (where.id === barA.id) return { logoUrl: barA.logoUrl };
@@ -58,18 +107,26 @@ describe('BarMissionMedalService FASE 3', () => {
       },
       barMissionSeason: {
         findFirst: jest.fn(async ({ where }: any) => {
-          if (where.id === seasonA.id && where.barId === barA.id) return { ...seasonA };
-          return null;
+          const season = seasonById(where.id);
+          if (!season) return null;
+          if (where.barId && season.barId !== where.barId) return null;
+          return { ...season };
+        }),
+        findUnique: jest.fn(async ({ where }: any) => {
+          const season = seasonById(where.id);
+          return season ? { ...season } : null;
         }),
         update: jest.fn(async ({ where, data }: any) => {
-          if (where.id === seasonA.id) Object.assign(seasonA, data);
-          return seasonA;
+          const season = seasonById(where.id);
+          if (!season) return null;
+          Object.assign(season, data);
+          return season;
         }),
       },
       barMission: {
         findMany: jest.fn(async ({ where }: any) => {
           const ids: string[] = where.id?.in ?? [];
-          return [missionA, missionOther].filter((m) => ids.includes(m.id));
+          return [missionA, missionBSameBar, missionOther].filter((m) => ids.includes(m.id));
         }),
       },
       barMissionMedalVersion: {
@@ -77,15 +134,7 @@ describe('BarMissionMedalService FASE 3', () => {
           versions.filter((v) => v.seasonId === where.seasonId).length,
         ),
         findFirst: jest.fn(async ({ where, orderBy }: any) => {
-          let rows = versions.filter((v) => {
-            if (where.seasonId && v.seasonId !== where.seasonId) return false;
-            if (where.id && v.id !== where.id) return false;
-            if (where.status) {
-              if (typeof where.status === 'string' && v.status !== where.status) return false;
-              if (where.status.in && !where.status.in.includes(v.status)) return false;
-            }
-            return true;
-          });
+          let rows = filterMedalVersions(where ?? {}, versions);
           if (orderBy?.version === 'desc') rows = rows.sort((a, b) => b.version - a.version);
           const row = rows[0];
           if (!row) return null;
@@ -422,6 +471,52 @@ describe('BarMissionMedalService FASE 3', () => {
     const draft = await service.createDraft('owner-a', 'season-a', validDto as any);
     await service.submit('owner-a', 'season-a', draft.id);
     await expect(admin.activate(draft.id, 'admin-1')).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('LEGEND: no activar segunda medalla ACTIVE en otra temporada del mismo bar', async () => {
+    const v1 = await service.createDraft('owner-a', 'season-a', validDto as any);
+    await service.submit('owner-a', 'season-a', v1.id);
+    await admin.approve(v1.id, 'admin-1');
+    await admin.activate(v1.id, 'admin-1');
+
+    const vOtherSeason = await service.createDraft('owner-a', 'season-b-a', {
+      ...validDto,
+      title: 'Otra temp',
+      description: 'Segunda temporada mismo bar.',
+      conditions: [
+        { type: BarMissionMedalConditionType.VISITS, targetValue: 3 },
+        { type: BarMissionMedalConditionType.DRINKS_UNLOCKED, targetValue: 5 },
+        {
+          type: BarMissionMedalConditionType.MISSION_COMPLETED,
+          referenceId: 'mission-b-a',
+        },
+      ],
+    } as any);
+    await service.submit('owner-a', 'season-b-a', vOtherSeason.id);
+    await admin.approve(vOtherSeason.id, 'admin-1');
+
+    await expect(admin.activate(vOtherSeason.id, 'admin-1')).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(versions.find((v) => v.id === v1.id)?.status).toBe(
+      BarMissionMedalVersionStatus.ACTIVE,
+    );
+    expect(versions.find((v) => v.id === vOtherSeason.id)?.status).toBe(
+      BarMissionMedalVersionStatus.APPROVED,
+    );
+  });
+
+  /**
+   * El bloqueo real entre transacciones concurrentes depende de `FOR UPDATE` en PostgreSQL.
+   * Este mock no serializa transacciones paralelas; ver `bar-mission-medal-bar-official.spec.ts`.
+   */
+  it('LEGEND: activate invoca $executeRaw (preparación lock bar) en transacción', async () => {
+    const draft = await service.createDraft('owner-a', 'season-a', validDto as any);
+    await service.submit('owner-a', 'season-a', draft.id);
+    await admin.approve(draft.id, 'admin-1');
+    prisma.$executeRaw.mockClear();
+    await admin.activate(draft.id, 'admin-1');
+    expect(prisma.$executeRaw).toHaveBeenCalled();
   });
 
   it('TEST 26/27: activar v2 desactiva v1; unlocks v1 intactos', async () => {

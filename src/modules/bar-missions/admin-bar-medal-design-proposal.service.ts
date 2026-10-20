@@ -16,6 +16,7 @@ import {
   barCustomMedalEnabledForPlan,
   normalizeSubscriptionPlan,
 } from '../subscriptions/subscription-plan.util';
+import { filterDesignProposalsForClientView } from './bar-medal-design-proposal-client.util';
 
 const PROPOSAL_POSITIONS = [1, 2, 3, 4, 5] as const;
 const ALLOWED_IMAGE_MIME = new Set([
@@ -82,10 +83,14 @@ export class AdminBarMedalDesignProposalService {
     }
   }
 
-  async getBatchForVersion(versionId: string) {
+  async getBatchForVersion(versionId: string, includeAuditProposals = false) {
     const version = await this.prisma.barMissionMedalVersion.findUnique({
       where: { id: versionId },
-      select: { id: true },
+      select: {
+        id: true,
+        designSelectionConfirmedAt: true,
+        selectedProposalId: true,
+      },
     });
     if (!version) throw new NotFoundException('MEDAL_VERSION_NOT_FOUND');
 
@@ -98,9 +103,24 @@ export class AdminBarMedalDesignProposalService {
       include: { proposals: { orderBy: { position: 'asc' } } },
     });
     if (!batch) {
-      return { batch: null, proposals: [] as const };
+      return { batch: null, proposals: [] as const, audit: { fullHistoryAvailable: false } };
     }
-    return this.mapBatchResponse(batch);
+    const mapped = this.mapBatchResponse(batch);
+    const visible = filterDesignProposalsForClientView(
+      mapped.proposals,
+      version,
+      includeAuditProposals,
+    );
+    return {
+      ...mapped,
+      proposals: visible,
+      audit: {
+        fullHistoryAvailable:
+          !includeAuditProposals &&
+          version.designSelectionConfirmedAt != null &&
+          mapped.proposals.length > visible.length,
+      },
+    };
   }
 
   async assignProposal(

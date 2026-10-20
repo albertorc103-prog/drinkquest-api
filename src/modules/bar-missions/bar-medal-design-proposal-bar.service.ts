@@ -13,6 +13,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { BarAccessService } from '../subscriptions/bar-access.service';
+import { filterDesignProposalsForClientView } from './bar-medal-design-proposal-client.util';
 import {
   BarFeature,
   barCustomMedalEnabledForPlan,
@@ -211,6 +212,17 @@ export class BarMedalDesignProposalBarService {
       }>;
     },
   ) {
+    const allProposals = batch.proposals.map((p) => ({
+      id: p.id,
+      position: p.position,
+      imageUrl: p.imageUrl,
+      selected: version.selectedProposalId === p.id,
+    }));
+    const visible = filterDesignProposalsForClientView(allProposals, version, false).map((p) => ({
+      ...p,
+      selected: true,
+    }));
+
     return {
       medalVersionId: version.id,
       batch: {
@@ -223,12 +235,7 @@ export class BarMedalDesignProposalBarService {
         confirmedAt: version.designSelectionConfirmedAt?.toISOString() ?? null,
         selectedProposalId: version.selectedProposalId,
       },
-      proposals: batch.proposals.map((p) => ({
-        id: p.id,
-        position: p.position,
-        imageUrl: p.imageUrl,
-        selected: version.selectedProposalId === p.id,
-      })),
+      proposals: visible,
     };
   }
 

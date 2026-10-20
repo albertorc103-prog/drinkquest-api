@@ -18,6 +18,7 @@ import {
 } from './bar-medal-design-proposal-flow.util';
 import { assertArtworkReadyForPublish } from './bar-medal-visual.util';
 import { AdminBarMedalDesignProposalService } from './admin-bar-medal-design-proposal.service';
+import { assertNoOtherActiveOfficialMedalForBar } from './bar-mission-medal-bar-official.util';
 import { BarMissionMedalService } from './bar-mission-medal.service';
 
 const XP_MAX = 500;
@@ -41,8 +42,8 @@ export class AdminBarMissionMedalService {
     return this.designProposals.createBatch(versionId, adminId);
   }
 
-  getDesignProposalBatch(versionId: string) {
-    return this.designProposals.getBatchForVersion(versionId);
+  getDesignProposalBatch(versionId: string, includeAuditProposals = false) {
+    return this.designProposals.getBatchForVersion(versionId, includeAuditProposals);
   }
 
   assignDesignProposal(
@@ -411,6 +412,18 @@ export class AdminBarMissionMedalService {
 
     try {
       const updated = await this.prisma.$transaction(async (tx) => {
+        const season = await tx.barMissionSeason.findUnique({
+          where: { id: version.seasonId },
+          select: { barId: true },
+        });
+        if (!season) throw new NotFoundException('Temporada no encontrada.');
+        await assertNoOtherActiveOfficialMedalForBar(
+          tx,
+          season.barId,
+          version.id,
+          version.seasonId,
+        );
+
         const now = new Date();
         await tx.barMissionMedalVersion.updateMany({
           where: {
