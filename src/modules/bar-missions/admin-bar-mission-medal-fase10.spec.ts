@@ -146,7 +146,12 @@ describe('AdminBarMissionMedalService FASE 10 enrichments', () => {
     };
 
     medals = new BarMissionMedalService(prisma as any, {} as any, {} as any);
-    admin = new AdminBarMissionMedalService(prisma as any, medals, {} as any);
+    admin = new AdminBarMissionMedalService(
+      prisma as any,
+      medals,
+      {} as any,
+      { notifyBarOwner: jest.fn(async () => null) } as any,
+    );
   });
 
   it('list default PENDING_REVIEW; ALL omite filtro', async () => {

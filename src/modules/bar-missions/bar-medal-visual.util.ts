@@ -4,6 +4,7 @@ import {
   resolveDesignConfigForClient,
   toPublicDesignConfig,
 } from './bar-medal-design-config';
+import { stripModerationAuditFromDesignConfigRaw } from './bar-mission-medal-moderation-audit.util';
 
 export type MedalVisualFields = {
   visualMode: BarMedalVisualMode;
@@ -27,12 +28,15 @@ export function mapMedalVisualFields(version: {
       ? version.artworkUrl.trim()
       : null;
   const artworkAvailable = artworkUrl != null;
-  const resolved = resolveDesignConfigForClient(version.designConfig);
+  const sanitizedConfig = stripModerationAuditFromDesignConfigRaw(
+    version.designConfig ?? null,
+  );
+  const resolved = resolveDesignConfigForClient(sanitizedConfig);
   return {
     visualMode,
     artworkUrl,
     artworkAvailable,
-    designConfig: version.designConfig ?? null,
+    designConfig: sanitizedConfig ?? null,
     visual: toPublicDesignConfig(resolved.designConfig),
     designConfigValid: resolved.designConfigValid,
     isLegacyVisualFallback: resolved.isLegacyFallback,

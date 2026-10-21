@@ -8,6 +8,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { SubscriptionChangeContext } from './interfaces/subscription-change-context.interface';
+import { LegendMedalEligibilityNotifyService } from './legend-medal-eligibility-notify.service';
 
 type DbClient = Prisma.TransactionClient | PrismaService;
 
@@ -22,6 +23,7 @@ export class BarSubscriptionService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly legendMedalEligibilityNotify: LegendMedalEligibilityNotifyService,
   ) {}
 
   async createTrialSubscription(
@@ -116,6 +118,9 @@ export class BarSubscriptionService {
     existing?: { id: string; status: SubscriptionStatus },
   ) {
     const sub = existing ?? (await this.requireSubscription(barId));
+    const beforeSnapshot = await this.prisma.barSubscription.findUnique({
+      where: { id: sub.id },
+    });
     const now = new Date();
     const nextStatus = (data.status as SubscriptionStatus | undefined) ?? sub.status;
     const statusChanging =
@@ -150,6 +155,18 @@ export class BarSubscriptionService {
         payload: options.payload,
       },
     });
+
+    if (beforeSnapshot) {
+      try {
+        await this.legendMedalEligibilityNotify.afterSubscriptionPersisted(
+          barId,
+          beforeSnapshot,
+          updated,
+        );
+      } catch {
+        // La notificación no debe revertir la suscripción persistida.
+      }
+    }
 
     return updated;
   }

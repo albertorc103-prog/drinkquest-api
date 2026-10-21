@@ -10,6 +10,7 @@ import { BarMissionMedalActivityService } from './bar-mission-medal-activity.ser
 import { BarMissionMedalProgressService } from './bar-mission-medal-progress.service';
 import { BarMissionMedalUnlockService } from './bar-mission-medal-unlock.service';
 import { BarMissionsService } from './bar-missions.service';
+import { legendBarSubscriptionFindUniqueMock } from './bar-mission-medal-test-legend-subscription.mock';
 
 /**
  * Integración FASE 5+6: triggers → progress → UnlockService.
@@ -96,6 +97,7 @@ describe('FASE 5 medal triggers integration', () => {
     ]);
 
     prisma = {
+      barSubscription: legendBarSubscriptionFindUniqueMock(),
       placeVisit: {
         count: jest.fn(async () => visitsCount),
       },

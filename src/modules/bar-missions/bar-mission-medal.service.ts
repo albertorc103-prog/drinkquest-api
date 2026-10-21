@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  BarMedalDesignProposalBatchStatus,
   BarMedalVisualMode,
   BarMissionMedalConditionMode,
   BarMissionMedalConditionType,
@@ -33,6 +34,18 @@ import {
   UpdateBarMedalDto,
   UpsertBarMedalDto,
 } from './dto/bar-mission-medal.dto';
+import {
+  appendModerationAuditEvent,
+  extractModerationAudit,
+  mergeDesignConfigPreservingModerationAudit,
+} from './bar-mission-medal-moderation-audit.util';
+import { evaluateLegendMedalOperational } from './bar-mission-medal-legend-operational.util';
+import {
+  assertCanStartOfficialDraft,
+  assertSingleOfficialMedalWorkflow,
+  findOfficialMedalVersionsForBar,
+  pickCanonicalOfficialWorkflowVersion,
+} from './bar-mission-medal-official-workflow.util';
 
 const MAX_CONDITIONS = 10;
 const EDITABLE: BarMissionMedalVersionStatus[] = [
@@ -149,9 +162,102 @@ export class BarMissionMedalService {
   }
 
   /** Crea DRAFT v1, o falla si ya hay versiones (usar createNextVersion). */
+  async getOfficialLegendMedalDossier(ownerUserId: string) {
+    const ctx = await this.barAccess.resolveByOwnerUserId(ownerUserId);
+    const rows = await findOfficialMedalVersionsForBar(this.prisma, ctx.bar.id);
+    const canonical = pickCanonicalOfficialWorkflowVersion(rows);
+    const legend = evaluateLegendMedalOperational(ctx.subscription);
+
+    if (!canonical) {
+      return {
+        barId: ctx.bar.id,
+        uiState: 'NO_REQUEST' as const,
+        seasonId: null,
+        version: null,
+        legendMedalOperational: legend.operational,
+        subscriptionSuspended: legend.subscriptionSuspended,
+        suspensionMessage: legend.suspensionMessage,
+        moderationHistory: [],
+      };
+    }
+
+    const version = await this.prisma.barMissionMedalVersion.findUnique({
+      where: { id: canonical.id },
+      include: { conditions: { orderBy: { position: 'asc' } } },
+    });
+    if (!version) {
+      return {
+        barId: ctx.bar.id,
+        uiState: 'NO_REQUEST' as const,
+        seasonId: null,
+        version: null,
+        legendMedalOperational: legend.operational,
+        subscriptionSuspended: legend.subscriptionSuspended,
+        suspensionMessage: legend.suspensionMessage,
+        moderationHistory: [],
+      };
+    }
+
+    const uiState = await this.resolveOfficialUiState(version, legend);
+    return {
+      barId: ctx.bar.id,
+      uiState,
+      seasonId: version.seasonId,
+      version: this.mapVersion(version),
+      legendMedalOperational: legend.operational,
+      subscriptionSuspended: legend.subscriptionSuspended,
+      suspensionMessage: legend.suspensionMessage,
+      moderationHistory: extractModerationAudit(version.designConfig),
+    };
+  }
+
+  private async resolveOfficialUiState(
+    version: {
+      id: string;
+      status: BarMissionMedalVersionStatus;
+      usesDesignProposalFlow: boolean;
+      designSelectionConfirmedAt: Date | null;
+    },
+    legend: ReturnType<typeof evaluateLegendMedalOperational>,
+  ): Promise<string> {
+    if (version.status === BarMissionMedalVersionStatus.ACTIVE) {
+      return legend.subscriptionSuspended ? 'SUSPENDED' : 'ACTIVE';
+    }
+    if (version.status === BarMissionMedalVersionStatus.DRAFT) {
+      return this.resolveDesignFlowUiState(version);
+    }
+    if (version.status === BarMissionMedalVersionStatus.PENDING_REVIEW) return 'PENDING';
+    if (version.status === BarMissionMedalVersionStatus.CHANGES_REQUESTED) {
+      return 'CORRECTION_REQUIRED';
+    }
+    if (version.status === BarMissionMedalVersionStatus.APPROVED) {
+      return 'APPROVED_AWAITING_ACTIVATION';
+    }
+    return 'PREPARATION';
+  }
+
+  private async resolveDesignFlowUiState(version: {
+    id: string;
+    usesDesignProposalFlow: boolean;
+    designSelectionConfirmedAt: Date | null;
+  }): Promise<string> {
+    if (!version.usesDesignProposalFlow) return 'PREPARATION';
+    if (version.designSelectionConfirmedAt) return 'DESIGN_CONFIRMED';
+    const sentBatch = await this.prisma.barMedalDesignProposalBatch.findFirst({
+      where: {
+        medalVersionId: version.id,
+        status: BarMedalDesignProposalBatchStatus.SENT,
+      },
+      select: { id: true, proposals: { select: { id: true }, take: 1 } },
+    });
+    if (sentBatch && sentBatch.proposals.length > 0) return 'CHOOSE';
+    return 'AWAITING_DESIGN_PROPOSALS';
+  }
+
   async createDraft(ownerUserId: string, seasonId: string, dto: UpsertBarMedalDto) {
     const { bar } = await this.assertOwnerFeature(ownerUserId);
     const season = await this.requireOwnedSeason(bar.id, seasonId);
+    await assertCanStartOfficialDraft(this.prisma, bar.id, season.id);
     const existing = await this.prisma.barMissionMedalVersion.count({
       where: { seasonId: season.id },
     });
@@ -223,10 +329,15 @@ export class BarMissionMedalService {
     const conditions = dto.conditions
       ? await this.validateConditions(season.id, bar.id, dto.conditions)
       : null;
-    const designConfig =
-      dto.designConfig !== undefined
-        ? await this.resolveDesignConfigForBar(ownerUserId, bar.id, dto.designConfig)
-        : null;
+    let designConfig: BarMedalDesignConfigV1 | null = null;
+    if (dto.designConfig !== undefined) {
+      const resolved = await this.resolveDesignConfigForBar(
+        ownerUserId,
+        bar.id,
+        dto.designConfig,
+      );
+      designConfig = resolved;
+    }
 
     const updated = await this.prisma.$transaction(async (tx) => {
       if (conditions) {
@@ -252,7 +363,10 @@ export class BarMissionMedalService {
           ...(designConfig
             ? {
                 templateId: buildTemplateId(designConfig),
-                designConfig: designConfig as unknown as Prisma.InputJsonValue,
+                designConfig: mergeDesignConfigPreservingModerationAudit(
+                  version.designConfig,
+                  designConfig as unknown as Prisma.InputJsonValue,
+                ),
               }
             : {}),
         },
@@ -275,6 +389,7 @@ export class BarMissionMedalService {
   async createNextVersion(ownerUserId: string, seasonId: string) {
     const { bar } = await this.assertOwnerFeature(ownerUserId);
     const season = await this.requireOwnedSeason(bar.id, seasonId);
+    await assertSingleOfficialMedalWorkflow(this.prisma, bar.id, season.id);
 
     const source =
       (await this.prisma.barMissionMedalVersion.findFirst({
@@ -402,6 +517,12 @@ export class BarMissionMedalService {
       validateDesignConfigInput(version.designConfig, { requireIdentityResolved: true });
     }
 
+    const designConfig = appendModerationAuditEvent(version.designConfig, {
+      action: 'RESUBMITTED',
+      adminId: null,
+      reason: null,
+    });
+
     const updated = await this.prisma.barMissionMedalVersion.update({
       where: { id: version.id },
       data: {
@@ -409,6 +530,7 @@ export class BarMissionMedalService {
         submittedAt: new Date(),
         submittedByUserId: ownerUserId,
         reviewNote: null,
+        designConfig,
       },
       include: { conditions: { orderBy: { position: 'asc' } } },
     });

@@ -11,14 +11,24 @@ import {
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { resolveDesignConfigForClient } from './bar-medal-design-config';
+import {
+  activateApprovedMedalVersionInTx,
+  loadVersionForActivation,
+} from './bar-mission-medal-activate.util';
+import { notifyBarLegendMedalEvent } from './bar-mission-medal-bar-notify.util';
+import {
+  appendModerationAuditEvent,
+  extractModerationAudit,
+} from './bar-mission-medal-moderation-audit.util';
+import { evaluateLegendMedalOperational } from './bar-mission-medal-legend-operational.util';
 import {
   assertDesignProposalReadyForModeration,
   assertDirectArtworkAllowed,
 } from './bar-medal-design-proposal-flow.util';
 import { assertArtworkReadyForPublish } from './bar-medal-visual.util';
 import { AdminBarMedalDesignProposalService } from './admin-bar-medal-design-proposal.service';
-import { assertNoOtherActiveOfficialMedalForBar } from './bar-mission-medal-bar-official.util';
 import { BarMissionMedalService } from './bar-mission-medal.service';
 
 const XP_MAX = 500;
@@ -30,12 +40,15 @@ const ARTWORK_EDITABLE: BarMissionMedalVersionStatus[] = [
   BarMissionMedalVersionStatus.APPROVED,
 ];
 
+export type AdminMedalOfficeBucket = 'PENDING' | 'ACTIVE' | 'SUSPENDED';
+
 @Injectable()
 export class AdminBarMissionMedalService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly medals: BarMissionMedalService,
     private readonly designProposals: AdminBarMedalDesignProposalService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   createDesignProposalBatch(versionId: string, adminId: string) {
@@ -64,6 +77,142 @@ export class AdminBarMissionMedalService {
 
   sendDesignProposalBatch(versionId: string, batchId: string, adminId: string) {
     return this.designProposals.sendBatch(versionId, batchId, adminId);
+  }
+
+  /**
+   * Vista simplificada ADMIN: un expediente por bar (Pendientes / Activas / Suspendidas).
+   */
+  async listOffice(params: {
+    bucket: AdminMedalOfficeBucket;
+    barId?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const page = Math.max(1, params.page ?? 1);
+    const limit = Math.min(100, Math.max(1, params.limit ?? 20));
+    const now = new Date();
+
+    const rows = await this.prisma.barMissionMedalVersion.findMany({
+      where: {
+        ...(params.barId ? { season: { barId: params.barId } } : {}),
+        season: { deletedAt: null },
+        status: {
+          in: [
+            BarMissionMedalVersionStatus.PENDING_REVIEW,
+            BarMissionMedalVersionStatus.APPROVED,
+            BarMissionMedalVersionStatus.ACTIVE,
+          ],
+        },
+      },
+      include: {
+        conditions: { orderBy: { position: 'asc' } },
+        season: {
+          include: {
+            bar: {
+              select: {
+                id: true,
+                businessName: true,
+                slug: true,
+                logoUrl: true,
+                subscription: {
+                  select: {
+                    plan: true,
+                    status: true,
+                    trialEndsAt: true,
+                    currentPeriodEnd: true,
+                    canceledAt: true,
+                    qrEnabled: true,
+                    promoEnabled: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      orderBy: [{ submittedAt: 'desc' }, { updatedAt: 'desc' }],
+    });
+
+    type Row = (typeof rows)[number];
+    const byBar = new Map<string, Row>();
+
+    const bucketOf = (row: Row): AdminMedalOfficeBucket | null => {
+      if (
+        row.status === BarMissionMedalVersionStatus.PENDING_REVIEW ||
+        row.status === BarMissionMedalVersionStatus.APPROVED
+      ) {
+        return 'PENDING';
+      }
+      if (row.status === BarMissionMedalVersionStatus.ACTIVE) {
+        const legend = evaluateLegendMedalOperational(
+      row.season.bar.subscription as Parameters<typeof evaluateLegendMedalOperational>[0],
+    );
+        return legend.operational ? 'ACTIVE' : 'SUSPENDED';
+      }
+      return null;
+    };
+
+    const priority = (row: Row): number => {
+      if (row.status === BarMissionMedalVersionStatus.ACTIVE) return 100;
+      if (row.status === BarMissionMedalVersionStatus.PENDING_REVIEW) return 80;
+      if (row.status === BarMissionMedalVersionStatus.APPROVED) return 70;
+      return 0;
+    };
+
+    for (const row of rows) {
+      const bucket = bucketOf(row);
+      if (!bucket) continue;
+      const barId = row.season.bar.id;
+      const existing = byBar.get(barId);
+      if (!existing || priority(row) > priority(existing)) {
+        byBar.set(barId, row);
+      } else if (
+        existing &&
+        priority(row) === priority(existing) &&
+        row.updatedAt > existing.updatedAt
+      ) {
+        byBar.set(barId, row);
+      }
+    }
+
+    const filtered = [...byBar.values()].filter((r) => bucketOf(r) === params.bucket);
+    filtered.sort((a, b) => {
+      const ta = a.submittedAt?.getTime() ?? a.updatedAt.getTime();
+      const tb = b.submittedAt?.getTime() ?? b.updatedAt.getTime();
+      return tb - ta;
+    });
+
+    const total = filtered.length;
+    const slice = filtered.slice((page - 1) * limit, page * limit);
+
+    return {
+      page,
+      limit,
+      total,
+      bucket: params.bucket,
+      items: slice.map((row) => {
+        const legend = evaluateLegendMedalOperational(
+          row.season.bar.subscription as Parameters<typeof evaluateLegendMedalOperational>[0],
+          now,
+        );
+        return {
+          ...this.medals.mapVersion(row),
+          conditionCount: row.conditions.length,
+          bar: this.mapBarSummary(row.season.bar),
+          season: {
+            id: row.season.id,
+            title: row.season.title,
+            status: row.season.status,
+            startsAt: row.season.startsAt.toISOString(),
+            endsAt: row.season.endsAt.toISOString(),
+          },
+          officeBucket: bucketOf(row),
+          legendMedalOperational: legend.operational,
+          subscriptionSuspended: legend.subscriptionSuspended,
+          suspensionMessage: legend.suspensionMessage,
+        };
+      }),
+    };
   }
 
   async list(params: {
@@ -179,9 +328,16 @@ export class AdminBarMissionMedalService {
       select: { id: true, version: true, title: true },
     });
 
+    const legend = evaluateLegendMedalOperational(
+      row.season.bar.subscription as Parameters<typeof evaluateLegendMedalOperational>[0],
+    );
     const mapped = this.medals.mapVersion(row);
     return {
       ...mapped,
+      moderationHistory: extractModerationAudit(row.designConfig),
+      legendMedalOperational: legend.operational,
+      subscriptionSuspended: legend.subscriptionSuspended,
+      suspensionMessage: legend.suspensionMessage,
       conditions: mapped.conditions.map((c) => ({
         ...c,
         missionTitle:
@@ -334,11 +490,40 @@ export class AdminBarMissionMedalService {
   }
 
   async requestChanges(versionId: string, adminId: string, reason: string) {
+    return this.applyCorrectionRequired(versionId, adminId, reason, 'CHANGES_REQUESTED');
+  }
+
+  /**
+   * Rechazo de moderación → corrección requerida (misma versión, sin tarjeta REJECTED en cola).
+   * REJECTED terminal queda reservado a bloqueos administrativos explícitos (disable/legacy).
+   */
+  async reject(versionId: string, adminId: string, reason: string) {
+    return this.applyCorrectionRequired(versionId, adminId, reason, 'CORRECTION_REQUIRED');
+  }
+
+  private async applyCorrectionRequired(
+    versionId: string,
+    adminId: string,
+    reason: string,
+    auditAction: 'CHANGES_REQUESTED' | 'CORRECTION_REQUIRED',
+  ) {
     const comment = reason.trim();
     if (comment.length < 3) {
       throw new BadRequestException('El comentario es obligatorio.');
     }
     const version = await this.requirePending(versionId);
+    const season = await this.prisma.barMissionSeason.findUnique({
+      where: { id: version.seasonId },
+      select: { barId: true },
+    });
+    if (!season) throw new NotFoundException('Temporada no encontrada.');
+
+    const designConfig = appendModerationAuditEvent(version.designConfig, {
+      action: auditAction,
+      adminId,
+      reason: comment,
+    });
+
     const updated = await this.prisma.barMissionMedalVersion.update({
       where: { id: version.id },
       data: {
@@ -346,28 +531,16 @@ export class AdminBarMissionMedalService {
         reviewNote: comment,
         moderatedByAdminId: adminId,
         moderatedAt: new Date(),
+        designConfig,
       },
       include: { conditions: { orderBy: { position: 'asc' } } },
     });
-    return this.medals.mapVersion(updated);
-  }
 
-  async reject(versionId: string, adminId: string, reason: string) {
-    const comment = reason.trim();
-    if (comment.length < 3) {
-      throw new BadRequestException('El comentario es obligatorio.');
-    }
-    const version = await this.requirePending(versionId);
-    const updated = await this.prisma.barMissionMedalVersion.update({
-      where: { id: version.id },
-      data: {
-        status: BarMissionMedalVersionStatus.REJECTED,
-        reviewNote: comment,
-        moderatedByAdminId: adminId,
-        moderatedAt: new Date(),
-      },
-      include: { conditions: { orderBy: { position: 'asc' } } },
+    await notifyBarLegendMedalEvent(this.notifications, season.barId, 'correction_required', {
+      versionId: version.id,
+      reason: comment,
     });
+
     return this.medals.mapVersion(updated);
   }
 
@@ -396,6 +569,72 @@ export class AdminBarMissionMedalService {
     return this.medals.mapVersion(updated);
   }
 
+  async approveAndActivate(versionId: string, adminId: string) {
+    const version = await this.prisma.barMissionMedalVersion.findUnique({
+      where: { id: versionId },
+      include: { conditions: { orderBy: { position: 'asc' } } },
+    });
+    if (!version) throw new NotFoundException('MEDAL_VERSION_NOT_FOUND');
+    if (version.status !== BarMissionMedalVersionStatus.PENDING_REVIEW) {
+      throw new BadRequestException('INVALID_STATUS_TRANSITION');
+    }
+    await this.assertReadyForApproval(version);
+
+    try {
+      const updated = await this.prisma.$transaction(async (tx) => {
+        const loaded = await loadVersionForActivation(tx, versionId);
+        if (loaded.status !== BarMissionMedalVersionStatus.PENDING_REVIEW) {
+          throw new BadRequestException('INVALID_STATUS_TRANSITION');
+        }
+        await this.assertReadyForApproval(loaded);
+
+        const auditDesign = appendModerationAuditEvent(loaded.designConfig, {
+          action: 'APPROVED',
+          adminId,
+        });
+        await tx.barMissionMedalVersion.update({
+          where: { id: versionId },
+          data: {
+            status: BarMissionMedalVersionStatus.APPROVED,
+            approvedAt: new Date(),
+            reviewNote: null,
+            designConfig: auditDesign,
+          },
+        });
+
+        return activateApprovedMedalVersionInTx(tx, {
+          versionId,
+          adminId,
+          subscription: loaded.season.bar.subscription,
+          season: loaded.season,
+          designConfig: auditDesign,
+          auditAction: 'APPROVE_AND_ACTIVATE',
+        });
+      });
+
+      const season = await this.prisma.barMissionSeason.findUnique({
+        where: { id: updated.seasonId },
+        select: { barId: true },
+      });
+      if (season) {
+        await notifyBarLegendMedalEvent(
+          this.notifications,
+          season.barId,
+          'approved_activated',
+          { versionId: updated.id },
+        );
+      }
+      return this.medals.mapVersion(updated);
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        throw new ConflictException(
+          'Ya existe otra versión ACTIVE para esta temporada. Reintenta.',
+        );
+      }
+      throw e;
+    }
+  }
+
   async activate(versionId: string, adminId: string) {
     const version = await this.prisma.barMissionMedalVersion.findUnique({
       where: { id: versionId },
@@ -412,49 +651,15 @@ export class AdminBarMissionMedalService {
 
     try {
       const updated = await this.prisma.$transaction(async (tx) => {
-        const season = await tx.barMissionSeason.findUnique({
-          where: { id: version.seasonId },
-          select: { barId: true },
+        const loaded = await loadVersionForActivation(tx, versionId);
+        return activateApprovedMedalVersionInTx(tx, {
+          versionId,
+          adminId,
+          subscription: loaded.season.bar.subscription,
+          season: loaded.season,
+          designConfig: loaded.designConfig,
+          auditAction: 'ACTIVATED',
         });
-        if (!season) throw new NotFoundException('Temporada no encontrada.');
-        await assertNoOtherActiveOfficialMedalForBar(
-          tx,
-          season.barId,
-          version.id,
-          version.seasonId,
-        );
-
-        const now = new Date();
-        await tx.barMissionMedalVersion.updateMany({
-          where: {
-            seasonId: version.seasonId,
-            status: BarMissionMedalVersionStatus.ACTIVE,
-            id: { not: version.id },
-          },
-          data: {
-            status: BarMissionMedalVersionStatus.DISABLED,
-            disabledAt: now,
-          },
-        });
-        const active = await tx.barMissionMedalVersion.update({
-          where: { id: version.id },
-          data: {
-            status: BarMissionMedalVersionStatus.ACTIVE,
-            activatedAt: now,
-            moderatedByAdminId: adminId,
-            moderatedAt: now,
-          },
-          include: { conditions: { orderBy: { position: 'asc' } } },
-        });
-        await tx.barMissionSeason.update({
-          where: { id: version.seasonId },
-          data: {
-            currentMedalVersionId: active.id,
-            medalTitle: active.title,
-            medalDescription: active.description,
-          },
-        });
-        return active;
       });
       return this.medals.mapVersion(updated);
     } catch (e) {
@@ -464,6 +669,42 @@ export class AdminBarMissionMedalService {
         );
       }
       throw e;
+    }
+  }
+
+  private async assertReadyForApproval(version: {
+    id: string;
+    conditions: Array<{ type: BarMissionMedalConditionType }>;
+    usesDesignProposalFlow: boolean;
+    visualMode: BarMedalVisualMode | null;
+    designConfig: Prisma.JsonValue | null;
+    artworkUrl: string | null;
+    artworkAssetId: string | null;
+    selectedProposalId: string | null;
+    designSelectionConfirmedAt: Date | null;
+  }) {
+    if (
+      version.conditions.some(
+        (c) => c.type === BarMissionMedalConditionType.EVENT_PARTICIPATION,
+      )
+    ) {
+      throw new BadRequestException('UNSUPPORTED_CONDITION');
+    }
+    if (version.usesDesignProposalFlow) {
+      await assertDesignProposalReadyForModeration(
+        this.prisma,
+        version as Parameters<typeof assertDesignProposalReadyForModeration>[1],
+      );
+    } else {
+      const mode = version.visualMode ?? BarMedalVisualMode.BUILDER_V1;
+      if (mode === BarMedalVisualMode.ADMIN_ARTWORK) {
+        assertArtworkReadyForPublish(version);
+      } else {
+        const { designConfigValid } = resolveDesignConfigForClient(version.designConfig);
+        if (!designConfigValid) {
+          throw new BadRequestException('INVALID_DESIGN_CONFIG');
+        }
+      }
     }
   }
 

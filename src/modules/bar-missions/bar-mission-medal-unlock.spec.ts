@@ -29,6 +29,17 @@ describe('BarMissionMedalUnlockService FASE 6', () => {
     userXp = 50;
 
     prisma = {
+      barSubscription: {
+        findUnique: jest.fn(async () => ({
+          plan: 'LEGEND',
+          status: 'ACTIVE',
+          trialEndsAt: null,
+          currentPeriodEnd: new Date('2030-01-01T00:00:00Z'),
+          canceledAt: null,
+          qrEnabled: true,
+          promoEnabled: true,
+        })),
+      },
       userBarMedal: {
         findUnique: jest.fn(async ({ where }: any) =>
           medals.find(

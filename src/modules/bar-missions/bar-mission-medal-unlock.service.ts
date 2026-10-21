@@ -7,6 +7,7 @@ import {
 import { PrismaService } from '../../database/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { UsersService } from '../users/users.service';
+import { evaluateLegendMedalOperational } from './bar-mission-medal-legend-operational.util';
 
 /** sourceType estable en GamificationReward (String, no enum Prisma). */
 export const BAR_MEDAL_UNLOCK_SOURCE = 'BAR_MEDAL_UNLOCK';
@@ -15,7 +16,8 @@ export type MedalUnlockStatus =
   | 'UNLOCKED'
   | 'ALREADY_UNLOCKED'
   | 'VERSION_NOT_ACTIVE'
-  | 'NOT_ELIGIBLE';
+  | 'NOT_ELIGIBLE'
+  | 'MEDAL_SUSPENDED';
 
 export type MedalUnlockResult = {
   status: MedalUnlockStatus;
@@ -120,6 +122,21 @@ export class BarMissionMedalUnlockService {
         if (!version || version.season.barId !== barId) {
           return {
             status: 'VERSION_NOT_ACTIVE' as const,
+            userBarMedalId: null,
+            medalVersionId: null,
+            xpAwarded: 0,
+            notification: null,
+            barId,
+          };
+        }
+
+        const subscription = await tx.barSubscription.findUnique({
+          where: { barId },
+        });
+        const legend = evaluateLegendMedalOperational(subscription);
+        if (!legend.operational) {
+          return {
+            status: 'MEDAL_SUSPENDED' as const,
             userBarMedalId: null,
             medalVersionId: null,
             xpAwarded: 0,

@@ -64,6 +64,7 @@ describe('Design proposal flow — moderación', () => {
       prisma as any,
       medals as any,
       {} as any,
+      { notifyBarOwner: jest.fn(async () => null) } as any,
     );
     await expect(admin.approve('v-flow', 'admin-1')).rejects.toMatchObject({
       message: 'DESIGN_PROPOSAL_SELECTION_REQUIRED',
@@ -105,6 +106,7 @@ describe('Design proposal flow — moderación', () => {
       prisma as any,
       medals as any,
       {} as any,
+      { notifyBarOwner: jest.fn(async () => null) } as any,
     );
     const result = await admin.approve('v-flow', 'admin-1');
     expect(result.status).toBe(BarMissionMedalVersionStatus.APPROVED);
@@ -128,6 +130,7 @@ describe('Design proposal flow — moderación', () => {
       prisma as any,
       { mapVersion: jest.fn() } as any,
       {} as any,
+      { notifyBarOwner: jest.fn(async () => null) } as any,
     );
     await expect(admin.approve('v-flow', 'admin-1')).rejects.toMatchObject({
       message: 'MEDAL_ARTWORK_REQUIRED',

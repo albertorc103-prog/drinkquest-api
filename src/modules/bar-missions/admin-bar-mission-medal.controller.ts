@@ -42,11 +42,21 @@ export class AdminBarMissionMedalController {
   })
   list(
     @Query('status') status?: string,
+    @Query('office') office?: string,
     @Query('barId') barId?: string,
     @Query('seasonId') seasonId?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ) {
+    const officeBucket = office?.trim().toUpperCase();
+    if (officeBucket === 'PENDING' || officeBucket === 'ACTIVE' || officeBucket === 'SUSPENDED') {
+      return this.moderation.listOffice({
+        bucket: officeBucket,
+        barId,
+        page: page ? parseInt(page, 10) : 1,
+        limit: limit ? parseInt(limit, 10) : 20,
+      });
+    }
     const normalized =
       !status || status.trim() === ''
         ? undefined
@@ -131,6 +141,18 @@ export class AdminBarMissionMedalController {
     return this.moderation.approve(versionId, admin.sub);
   }
 
+  @Post(':versionId/approve-and-activate')
+  @RequirePermissions(AuthPermission.MODERATE_CONTENT)
+  @ApiOperation({
+    summary: 'Aprobar y activar en una transacción (PENDING_REVIEW → ACTIVE)',
+  })
+  approveAndActivate(
+    @CurrentUser() admin: JwtPayload,
+    @Param('versionId') versionId: string,
+  ) {
+    return this.moderation.approveAndActivate(versionId, admin.sub);
+  }
+
   @Post(':versionId/request-changes')
   @RequirePermissions(AuthPermission.MODERATE_CONTENT)
   @ApiOperation({ summary: 'Solicitar cambios (requiere comentario)' })
@@ -144,7 +166,9 @@ export class AdminBarMissionMedalController {
 
   @Post(':versionId/reject')
   @RequirePermissions(AuthPermission.MODERATE_CONTENT)
-  @ApiOperation({ summary: 'Rechazar versión (terminal; requiere comentario)' })
+  @ApiOperation({
+    summary: 'Rechazar solicitud → corrección requerida (misma versión; requiere motivo)',
+  })
   reject(
     @CurrentUser() admin: JwtPayload,
     @Param('versionId') versionId: string,

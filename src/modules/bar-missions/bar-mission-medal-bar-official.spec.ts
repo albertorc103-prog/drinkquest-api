@@ -52,8 +52,28 @@ describe('bar official medal — una ACTIVE por establecimiento', () => {
   });
 
   it('activate rechaza segunda medalla ACTIVE en otro season del mismo bar', async () => {
-    const seasonA = { id: 'season-a', barId: 'bar-a' };
-    const seasonB = { id: 'season-b', barId: 'bar-a' };
+    const now = Date.now();
+    const seasonA = {
+      id: 'season-a',
+      barId: 'bar-a',
+      startsAt: new Date(now - 1000),
+      endsAt: new Date(now + 86400000),
+    };
+    const seasonB = {
+      id: 'season-b',
+      barId: 'bar-a',
+      startsAt: new Date(now - 1000),
+      endsAt: new Date(now + 86400000),
+    };
+    const legendSub = {
+      plan: 'LEGEND',
+      status: 'ACTIVE',
+      trialEndsAt: null,
+      currentPeriodEnd: new Date(now + 86400000),
+      canceledAt: null,
+      qrEnabled: true,
+      promoEnabled: true,
+    };
     const versions = [
       {
         id: 'ver-a',
@@ -76,11 +96,24 @@ describe('bar official medal — una ACTIVE por establecimiento', () => {
     ];
 
     const updateMany = jest.fn(async () => ({ count: 0 }));
-    const update = jest.fn();
+    const update = jest.fn(async ({ where, data }: any) => {
+      const row = versions.find((v) => v.id === where.id);
+      Object.assign(row!, data);
+      return { ...row, conditions: [] };
+    });
     const seasonFindUnique = jest.fn(async ({ where }: any) => {
       if (where.id === 'season-b') return seasonB;
       if (where.id === 'season-a') return seasonA;
       return null;
+    });
+    const versionWithSeason = (row: (typeof versions)[number]) => ({
+      ...row,
+      designConfig: null,
+      conditions: [],
+      season: {
+        ...seasonFindUnique({ where: { id: row.seasonId } }),
+        bar: { subscription: legendSub },
+      },
     });
     const prisma = {
       barMissionMedalVersion: {
@@ -104,6 +137,10 @@ describe('bar official medal — una ACTIVE por establecimiento', () => {
               seasonId: 'season-a',
               version: 1,
             })),
+            findUnique: jest.fn(async ({ where }: any) => {
+              const row = versions.find((v) => v.id === where.id);
+              return row ? versionWithSeason(row) : null;
+            }),
             updateMany,
             update,
           },
@@ -120,6 +157,7 @@ describe('bar official medal — una ACTIVE por establecimiento', () => {
       prisma as any,
       { mapVersion: (v: any) => v } as any,
       {} as any,
+      { notifyBarOwner: jest.fn(async () => null) } as any,
     );
 
     await expect(admin.activate('ver-b', 'admin-1')).rejects.toBeInstanceOf(

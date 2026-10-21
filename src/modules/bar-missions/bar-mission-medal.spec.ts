@@ -143,22 +143,60 @@ describe('BarMissionMedalService FASE 3', () => {
             conditions: conditions.filter((c) => c.medalVersionId === row.id),
           };
         }),
-        findUnique: jest.fn(async ({ where }: any) => {
+        findUnique: jest.fn(async ({ where, include }: any) => {
           const row = versions.find((v) => v.id === where.id);
           if (!row) return null;
-          return {
+          const base = {
             ...row,
+            usesDesignProposalFlow: row.usesDesignProposalFlow ?? false,
+            visualMode: row.visualMode ?? 'ADMIN_ARTWORK',
+            artworkUrl: row.artworkUrl ?? 'https://cdn.example/medal.png',
+            artworkAssetId: row.artworkAssetId ?? 'asset-owned',
             conditions: conditions.filter((c) => c.medalVersionId === row.id),
           };
+          if (include?.season) {
+            const season = seasonById(row.seasonId);
+            return {
+              ...base,
+              season: {
+                ...season,
+                startsAt: new Date('2026-01-01T00:00:00Z'),
+                endsAt: new Date('2030-01-01T00:00:00Z'),
+                bar: {
+                  subscription: {
+                    plan: SubscriptionPlan.LEGEND,
+                    status: SubscriptionStatus.ACTIVE,
+                    trialEndsAt: null,
+                    currentPeriodEnd: new Date('2030-01-01T00:00:00Z'),
+                    canceledAt: null,
+                    qrEnabled: true,
+                    promoEnabled: true,
+                  },
+                },
+              },
+            };
+          }
+          return base;
         }),
-        findMany: jest.fn(async ({ where }: any) =>
-          versions
-            .filter((v) => !where?.seasonId || v.seasonId === where.seasonId)
-            .map((v) => ({
-              ...v,
-              conditions: conditions.filter((c) => c.medalVersionId === v.id),
-            })),
-        ),
+        findMany: jest.fn(async ({ where }: any) => {
+          let rows = [...versions];
+          if (where?.seasonId) {
+            rows = rows.filter((v) => v.seasonId === where.seasonId);
+          }
+          if (where?.season?.barId) {
+            rows = rows.filter((v) => {
+              const season = seasonById(v.seasonId);
+              return season?.barId === where.season.barId;
+            });
+          }
+          if (where?.status?.not) {
+            rows = rows.filter((v) => v.status !== where.status.not);
+          }
+          return rows.map((v) => ({
+            ...v,
+            conditions: conditions.filter((c) => c.medalVersionId === v.id),
+          }));
+        }),
         aggregate: jest.fn(async ({ where }: any) => {
           const rows = versions.filter((v) => v.seasonId === where.seasonId);
           return { _max: { version: rows.reduce((m, v) => Math.max(m, v.version), 0) || null } };
@@ -272,6 +310,17 @@ describe('BarMissionMedalService FASE 3', () => {
           return null;
         }),
       },
+      barSubscription: {
+        findUnique: jest.fn(async () => ({
+          plan: SubscriptionPlan.LEGEND,
+          status: SubscriptionStatus.ACTIVE,
+          trialEndsAt: null,
+          currentPeriodEnd: new Date('2030-01-01T00:00:00Z'),
+          canceledAt: null,
+          qrEnabled: true,
+          promoEnabled: true,
+        })),
+      },
       $transaction: jest.fn(async (arg: any) => {
         if (typeof arg === 'function') return arg(prisma);
         return Promise.all(arg);
@@ -310,7 +359,12 @@ describe('BarMissionMedalService FASE 3', () => {
     };
 
     service = new BarMissionMedalService(prisma, barAccess, {} as any);
-    admin = new AdminBarMissionMedalService(prisma, service, {} as any);
+    admin = new AdminBarMissionMedalService(
+      prisma,
+      service,
+      {} as any,
+      { notifyBarOwner: jest.fn(async () => null) } as any,
+    );
   });
 
   const validDesign = {
@@ -463,7 +517,8 @@ describe('BarMissionMedalService FASE 3', () => {
       BadRequestException,
     );
     await expect(admin.reject(draft.id, 'admin-1', 'Motivo válido de rechazo')).resolves.toMatchObject({
-      status: BarMissionMedalVersionStatus.REJECTED,
+      status: BarMissionMedalVersionStatus.CHANGES_REQUESTED,
+      reviewComment: 'Motivo válido de rechazo',
     });
   });
 
@@ -479,31 +534,25 @@ describe('BarMissionMedalService FASE 3', () => {
     await admin.approve(v1.id, 'admin-1');
     await admin.activate(v1.id, 'admin-1');
 
-    const vOtherSeason = await service.createDraft('owner-a', 'season-b-a', {
-      ...validDto,
-      title: 'Otra temp',
-      description: 'Segunda temporada mismo bar.',
-      conditions: [
-        { type: BarMissionMedalConditionType.VISITS, targetValue: 3 },
-        { type: BarMissionMedalConditionType.DRINKS_UNLOCKED, targetValue: 5 },
-        {
-          type: BarMissionMedalConditionType.MISSION_COMPLETED,
-          referenceId: 'mission-b-a',
-        },
-      ],
-    } as any);
-    await service.submit('owner-a', 'season-b-a', vOtherSeason.id);
-    await admin.approve(vOtherSeason.id, 'admin-1');
-
-    await expect(admin.activate(vOtherSeason.id, 'admin-1')).rejects.toBeInstanceOf(
-      ConflictException,
-    );
+    await expect(
+      service.createDraft('owner-a', 'season-b-a', {
+        ...validDto,
+        title: 'Otra temp',
+        description: 'Segunda temporada mismo bar.',
+        conditions: [
+          { type: BarMissionMedalConditionType.VISITS, targetValue: 3 },
+          { type: BarMissionMedalConditionType.DRINKS_UNLOCKED, targetValue: 5 },
+          {
+            type: BarMissionMedalConditionType.MISSION_COMPLETED,
+            referenceId: 'mission-b-a',
+          },
+        ],
+      } as any),
+    ).rejects.toBeInstanceOf(ConflictException);
     expect(versions.find((v) => v.id === v1.id)?.status).toBe(
       BarMissionMedalVersionStatus.ACTIVE,
     );
-    expect(versions.find((v) => v.id === vOtherSeason.id)?.status).toBe(
-      BarMissionMedalVersionStatus.APPROVED,
-    );
+    expect(versions.filter((v) => v.seasonId === 'season-b-a')).toHaveLength(0);
   });
 
   /**
@@ -596,7 +645,7 @@ describe('BarMissionMedalService FASE 3', () => {
     expect(attempts).toBe(2);
   });
 
-  it('PRECHECK: REJECTED sin ACTIVE permite new-version clonando la REJECTED', async () => {
+  it('PRECHECK: rechazo de moderación → corrección y reenvío en la misma versión', async () => {
     const v1 = await service.createDraft('owner-a', 'season-a', {
       ...validDto,
       title: 'Medalla rechazada',
@@ -605,25 +654,27 @@ describe('BarMissionMedalService FASE 3', () => {
     } as any);
     await service.submit('owner-a', 'season-a', v1.id);
     await admin.reject(v1.id, 'admin-1', 'Motivo valido de rechazo largo');
-    expect(versions.find((v) => v.id === v1.id).status).toBe(BarMissionMedalVersionStatus.REJECTED);
+    expect(versions.find((v) => v.id === v1.id).status).toBe(
+      BarMissionMedalVersionStatus.CHANGES_REQUESTED,
+    );
     expect(versions.some((v) => v.status === BarMissionMedalVersionStatus.ACTIVE)).toBe(false);
 
-    const v2 = await service.createNextVersion('owner-a', 'season-a');
-    expect(v2.version).toBe(2);
-    expect(v2.status).toBe(BarMissionMedalVersionStatus.DRAFT);
-    expect(v2.title).toBe('Medalla rechazada');
-    expect(v2.description).toBe('Desc original para clonar');
-    expect(v2.conditionMode).toBe('ANY');
-    expect(v2.reviewComment).toBeNull();
-    expect(v2.submittedAt).toBeNull();
-    expect(v2.approvedAt).toBeNull();
-    expect(v2.activatedAt).toBeNull();
-    expect(v2.conditions.map((c: { type: string }) => c.type)).toEqual([
+    const resubmitted = await service.submit('owner-a', 'season-a', v1.id);
+    expect(resubmitted.id).toBe(v1.id);
+    expect(resubmitted.version).toBe(1);
+    expect(resubmitted.status).toBe(BarMissionMedalVersionStatus.PENDING_REVIEW);
+    expect(resubmitted.title).toBe('Medalla rechazada');
+    expect(resubmitted.description).toBe('Desc original para clonar');
+    expect(resubmitted.conditionMode).toBe('ANY');
+    expect(resubmitted.reviewComment).toBeNull();
+    expect(resubmitted.conditions.map((c: { type: string }) => c.type)).toEqual([
       'VISITS',
       'DRINKS_UNLOCKED',
       'MISSION_COMPLETED',
     ]);
-    expect(versions.find((v) => v.id === v1.id).status).toBe(BarMissionMedalVersionStatus.REJECTED);
-    expect(seasonA.currentMedalVersionId).toBe(v2.id);
+    expect(versions.find((v) => v.id === v1.id).status).toBe(
+      BarMissionMedalVersionStatus.PENDING_REVIEW,
+    );
+    expect(seasonA.currentMedalVersionId).toBe(v1.id);
   });
 });

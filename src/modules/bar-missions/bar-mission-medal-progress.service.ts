@@ -9,6 +9,7 @@ import {
   ActiveMedalVersionWithConditions,
   BarMissionMedalActiveResolver,
 } from './bar-mission-medal-active.resolver';
+import { evaluateLegendMedalOperational } from './bar-mission-medal-legend-operational.util';
 
 export type MedalConditionProgress = {
   id: string;
@@ -175,6 +176,12 @@ export class BarMissionMedalProgressService {
       version.conditionMode,
       conditions,
     );
+    const subscription = await this.prisma.barSubscription.findUnique({
+      where: { barId: season.barId },
+    });
+    const legend = evaluateLegendMedalOperational(subscription);
+    const eligible =
+      eligibleToUnlock && legend.operational && this.isWithinSeasonWindow(season);
     return {
       seasonId: season.id,
       status: 'IN_PROGRESS',
@@ -182,7 +189,7 @@ export class BarMissionMedalProgressService {
       earnedMedalVersionId: null,
       unlocked: false,
       unlockedAt: null,
-      eligibleToUnlock,
+      eligibleToUnlock: eligible,
       conditionMode: version.conditionMode,
       overallProgress,
       title: version.title,
@@ -229,6 +236,10 @@ export class BarMissionMedalProgressService {
       description: version?.description ?? season.medalDescription,
       conditions,
     };
+  }
+
+  private isWithinSeasonWindow(season: SeasonWindow, now = new Date()): boolean {
+    return season.startsAt <= now && season.endsAt >= now;
   }
 
   private emptyState(

@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { stripModerationAuditFromDesignConfigRaw } from './bar-mission-medal-moderation-audit.util';
 
 /** Identificador de plantilla visual V1 (columna templateId). */
 export const BAR_MEDAL_TEMPLATE_V1 = 'bar-medal-visual-v1';
@@ -129,6 +130,7 @@ export function validateDesignConfigInput(
   raw: unknown,
   opts?: { requireIdentityResolved?: boolean },
 ): BarMedalDesignConfigV1 {
+  raw = stripModerationAuditFromDesignConfigRaw(raw);
   if (!isPlainObject(raw)) {
     throw new BadRequestException('INVALID_DESIGN_CONFIG');
   }

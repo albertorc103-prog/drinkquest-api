@@ -70,6 +70,17 @@ describe('BarMissionMedalProgressService FASE 4', () => {
     ];
 
     prisma = {
+      barSubscription: {
+        findUnique: jest.fn(async () => ({
+          plan: 'LEGEND',
+          status: 'ACTIVE',
+          trialEndsAt: null,
+          currentPeriodEnd: new Date('2030-01-01T00:00:00Z'),
+          canceledAt: null,
+          qrEnabled: true,
+          promoEnabled: true,
+        })),
+      },
       placeVisit: {
         count: jest.fn(async ({ where }: any) => {
           if (where.barId !== season.barId) return 0;

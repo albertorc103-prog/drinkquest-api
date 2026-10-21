@@ -9,6 +9,7 @@ import { AdminBarMissionMedalController } from './admin-bar-mission-medal.contro
 import { AdminBarMissionMedalService } from './admin-bar-mission-medal.service';
 import { BarMissionMedalActiveResolver } from './bar-mission-medal-active.resolver';
 import { BarMissionMedalActivityService } from './bar-mission-medal-activity.service';
+import { BarLegendMedalController } from './bar-legend-medal.controller';
 import { BarMissionMedalController } from './bar-mission-medal.controller';
 import { BarMissionMedalProgressService } from './bar-mission-medal-progress.service';
 import { BarMissionMedalPublicService } from './bar-mission-medal-public.service';
@@ -33,6 +34,7 @@ import { UserBarMissionsController } from './user-bar-missions.controller';
   controllers: [
     BarMissionSeasonsController,
     BarMissionMedalController,
+    BarLegendMedalController,
     PublicBarMedalController,
     UserBarMedalsController,
     UserBarMissionsController,

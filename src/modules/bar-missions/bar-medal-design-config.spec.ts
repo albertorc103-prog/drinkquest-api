@@ -34,6 +34,15 @@ describe('Bar medal designConfig V1', () => {
     expect(cfg.ornaments).toEqual(['STARS', 'ALCHEMY']);
   });
 
+  it('ignora _moderationAudit al validar designConfig', () => {
+    const cfg = validateDesignConfigInput({
+      ...baseDesign,
+      _moderationAudit: [{ at: '2026-01-01', action: 'CORRECTION_REQUIRED' }],
+    });
+    expect(cfg.shape).toBe('HEXAGON');
+    expect((cfg as Record<string, unknown>)['_moderationAudit']).toBeUndefined();
+  });
+
   it('2. shape inválida', () => {
     expect(() => validateDesignConfigInput({ ...baseDesign, shape: 'STAR' })).toThrow(
       BadRequestException,
@@ -307,7 +316,12 @@ describe('BarMissionMedalService designConfig integración', () => {
     };
 
     service = new BarMissionMedalService(prisma, barAccess, {} as any);
-    admin = new AdminBarMissionMedalService(prisma, service, {} as any);
+    admin = new AdminBarMissionMedalService(
+      prisma,
+      service,
+      {} as any,
+      { notifyBarOwner: jest.fn(async () => null) } as any,
+    );
   });
 
   it('7. identity LOGO válido', async () => {

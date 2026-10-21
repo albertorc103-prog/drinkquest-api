@@ -80,6 +80,17 @@ describe('FASE 7 public medal + stats APIs', () => {
     };
 
     prisma = {
+      barSubscription: {
+        findUnique: jest.fn(async () => ({
+          plan: 'LEGEND',
+          status: 'ACTIVE',
+          trialEndsAt: null,
+          currentPeriodEnd: new Date('2030-01-01T00:00:00Z'),
+          canceledAt: null,
+          qrEnabled: true,
+          promoEnabled: true,
+        })),
+      },
       bar: {
         findFirst: jest.fn(async ({ where }: any) =>
           where.id === 'bar-1' ? { id: 'bar-1' } : null,

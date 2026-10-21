@@ -43,7 +43,12 @@ describe('Admin medal artwork (temporal ADMIN_ARTWORK)', () => {
       })),
     };
     const designProposals = {} as any;
-    return new AdminBarMissionMedalService(prisma as any, medalService as any, designProposals);
+    return new AdminBarMissionMedalService(
+      prisma as any,
+      medalService as any,
+      designProposals,
+      { notifyBarOwner: jest.fn(async () => null) } as any,
+    );
   }
 
   it('setArtwork congela asset en versión editable', async () => {
