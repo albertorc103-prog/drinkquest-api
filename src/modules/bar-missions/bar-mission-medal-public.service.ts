@@ -114,9 +114,16 @@ export class BarMissionMedalPublicService {
       return { available: false as const, unlocked: false, overallProgress: 0 };
     }
 
-    const progress = await this.medalProgress.getSeasonMedalProgress(userId, season.id);
+    let progress = await this.medalProgress.getSeasonMedalProgress(userId, season.id);
     if (progress.status === 'NO_ACTIVE_MEDAL' && !progress.unlocked) {
-      return { available: false as const, unlocked: false, overallProgress: 0 };
+      const display = await this.resolveActiveMedalForBarDisplay(barId);
+      if (display) {
+        season = { id: display.seasonId };
+        progress = await this.medalProgress.getSeasonMedalProgress(userId, display.seasonId);
+      }
+      if (progress.status === 'NO_ACTIVE_MEDAL' && !progress.unlocked) {
+        return { available: false as const, unlocked: false, overallProgress: 0 };
+      }
     }
 
     let xpReward: number | null = null;
