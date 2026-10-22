@@ -51,4 +51,39 @@ export class BarMissionMedalActiveResolver {
     }
     return rows[0];
   }
+
+  /**
+   * Medalla ACTIVE del establecimiento (mapa / ficha pública).
+   * Si no hay temporada ACTIVE en ventana, aún puede existir una versión ACTIVE en otra temporada.
+   */
+  async findActiveMedalVersionForBar(
+    barId: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<{ version: ActiveMedalVersionWithConditions; seasonId: string } | null> {
+    const db = tx ?? this.prisma;
+    const rows = await db.barMissionMedalVersion.findMany({
+      where: {
+        status: BarMissionMedalVersionStatus.ACTIVE,
+        season: { barId, deletedAt: null },
+      },
+      include: {
+        conditions: { orderBy: { position: 'asc' } },
+        season: { select: { id: true, startsAt: true } },
+      },
+      orderBy: [{ season: { startsAt: 'desc' } }, { version: 'desc' }],
+      take: 2,
+    });
+    if (rows.length === 0) return null;
+    if (rows.length > 1) {
+      this.logger.warn(
+        `Bar ${barId} has ${rows.length} ACTIVE medal versions across seasons; using newest season.`,
+      );
+    }
+    const row = rows[0];
+    const { season, conditions, ...version } = row;
+    return {
+      seasonId: season.id,
+      version: { ...version, conditions },
+    };
+  }
 }

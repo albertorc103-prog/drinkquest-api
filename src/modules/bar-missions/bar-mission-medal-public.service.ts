@@ -40,15 +40,11 @@ export class BarMissionMedalPublicService {
     });
     if (!bar) throw new NotFoundException('Bar no encontrado.');
 
-    const season = await this.resolveVisibleSeason(barId);
-    if (!season) {
+    const resolved = await this.resolveActiveMedalForBarDisplay(barId);
+    if (!resolved) {
       return { available: false as const };
     }
-
-    const active = await this.activeResolver.findActiveMedalVersionForSeason(season.id);
-    if (!active) {
-      return { available: false as const };
-    }
+    const { seasonId, active } = resolved;
 
     const missionIds = active.conditions
       .filter((c) => c.type === BarMissionMedalConditionType.MISSION_COMPLETED && c.referenceId)
@@ -57,7 +53,7 @@ export class BarMissionMedalPublicService {
       missionIds.length === 0
         ? []
         : await this.prisma.barMission.findMany({
-            where: { id: { in: missionIds }, seasonId: season.id },
+            where: { id: { in: missionIds }, seasonId },
             select: { id: true, title: true, description: true },
           });
     const missionById = new Map(missions.map((m) => [m.id, m]));
@@ -65,7 +61,7 @@ export class BarMissionMedalPublicService {
     return {
       available: true as const,
       barId,
-      seasonId: season.id,
+      seasonId,
       medalVersionId: active.id,
       title: active.title,
       description: active.description,
@@ -99,13 +95,20 @@ export class BarMissionMedalPublicService {
       select: { seasonId: true },
     });
 
-    const season =
+    let season =
       (earned
         ? await this.prisma.barMissionSeason.findFirst({
             where: { id: earned.seasonId, deletedAt: null },
             select: { id: true },
           })
         : null) ?? (await this.resolveVisibleSeason(barId));
+
+    if (!season) {
+      const display = await this.resolveActiveMedalForBarDisplay(barId);
+      if (display) {
+        season = { id: display.seasonId };
+      }
+    }
 
     if (!season) {
       return { available: false as const, unlocked: false, overallProgress: 0 };
@@ -332,5 +335,23 @@ export class BarMissionMedalPublicService {
       select: { id: true, barId: true, startsAt: true, endsAt: true },
       orderBy: { startsAt: 'desc' },
     });
+  }
+
+  /** Temporada en ventana o, si no, la de la medalla ACTIVE del bar (Quest Map). */
+  private async resolveActiveMedalForBarDisplay(barId: string) {
+    const season = await this.resolveVisibleSeason(barId);
+    let active = season
+      ? await this.activeResolver.findActiveMedalVersionForSeason(season.id)
+      : null;
+    let seasonId = season?.id ?? null;
+    if (!active) {
+      const forBar = await this.activeResolver.findActiveMedalVersionForBar(barId);
+      if (forBar) {
+        active = forBar.version;
+        seasonId = forBar.seasonId;
+      }
+    }
+    if (!active || !seasonId) return null;
+    return { seasonId, active };
   }
 }
